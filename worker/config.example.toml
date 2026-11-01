@@ -1,0 +1,16 @@
+api_url = "https://origin.xdoublegroup.online:8443/api/v1"
+# The UUID returned by the server administrator when creating this Worker.
+worker_id = "00000000-0000-4000-8000-000000000000"
+max_parallel = 1
+allow_publish = false
+adb_path = "adb"
+ffprobe_path = "ffprobe"
+min_free_ram_gb = 2.0
+min_free_disk_gb = 5.0
+# Optional: use the installed MuMu Manager path. No duplicate emulator is installed.
+# mumu_manager = 'C:\Program Files\Netease\MuMuPlayer-12.0\shell\MuMuManager.exe'
+# Use the bind command to append a real [[devices]] section with its Android ID.
+# After binding, add [devices.profiles] paths to locally calibrated profiles:
+# tiktok = "profiles/tiktok.local.json"
+# instagram = "profiles/instagram.local.json"
+# youtube = "profiles/youtube.local.json"

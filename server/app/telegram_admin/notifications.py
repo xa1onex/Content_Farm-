@@ -1,0 +1,19 @@
+import asyncio,logging
+from datetime import timedelta
+from sqlalchemy import select
+from aiogram.exceptions import TelegramAPIError
+from app.db import transaction,now
+from app.models import Event,TelegramSubscriber,NotificationDelivery
+from sqlalchemy.dialects.postgresql import insert
+log=logging.getLogger(__name__)
+
+def enqueue():
+    with transaction() as s:
+        events=list(s.scalars(select(Event).where(Event.created_at>now()-timedelta(days=1))))
+        subscribers=list(s.scalars(select(TelegramSubscriber).where(TelegramSubscriber.enabled.is_(True))))
+        for event in events:
+            for subscriber in subscribers:
+                if event.created_at<subscriber.created_at:continue
+                s.execute(insert(NotificationDelivery).values(event_id=event.id,chat_id=subscriber.chat_id)
+                    .on_conflict_do_nothing())
+

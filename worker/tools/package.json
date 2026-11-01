@@ -1,0 +1,7 @@
+{
+  "name": "shortpost-appium-tools",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Optional isolated Appium 2 installation for Windows",
+  "dependencies": {"appium": "2.19.0"}
+}

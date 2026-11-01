@@ -1,0 +1,180 @@
+{
+  "$defs": {
+    "DeviceConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "external_id": {
+          "maxLength": 120,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_-]+$",
+          "title": "External Id",
+          "type": "string"
+        },
+        "instance_index": {
+          "maximum": 999,
+          "minimum": 0,
+          "title": "Instance Index",
+          "type": "integer"
+        },
+        "android_id": {
+          "maxLength": 100,
+          "minLength": 8,
+          "title": "Android Id",
+          "type": "string"
+        },
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "adb_endpoint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Adb Endpoint"
+        },
+        "appium_url": {
+          "default": "http://127.0.0.1:4723",
+          "title": "Appium Url",
+          "type": "string"
+        },
+        "system_port": {
+          "default": 8200,
+          "maximum": 65535,
+          "minimum": 1024,
+          "title": "System Port",
+          "type": "integer"
+        },
+        "profiles": {
+          "additionalProperties": {
+            "format": "path",
+            "type": "string"
+          },
+          "title": "Profiles",
+          "type": "object"
+        }
+      },
+      "required": [
+        "external_id",
+        "instance_index",
+        "android_id"
+      ],
+      "title": "DeviceConfig",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "api_url": {
+      "default": "https://origin.xdoublegroup.online:8443/api/v1",
+      "title": "Api Url",
+      "type": "string"
+    },
+    "worker_id": {
+      "format": "uuid",
+      "title": "Worker Id",
+      "type": "string"
+    },
+    "state_dir": {
+      "format": "path",
+      "title": "State Dir",
+      "type": "string"
+    },
+    "max_parallel": {
+      "default": 1,
+      "maximum": 10,
+      "minimum": 1,
+      "title": "Max Parallel",
+      "type": "integer"
+    },
+    "adb_path": {
+      "default": "adb",
+      "format": "path",
+      "title": "Adb Path",
+      "type": "string"
+    },
+    "mumu_manager": {
+      "anyOf": [
+        {
+          "format": "path",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Mumu Manager"
+    },
+    "ffprobe_path": {
+      "default": "ffprobe",
+      "format": "path",
+      "title": "Ffprobe Path",
+      "type": "string"
+    },
+    "min_free_ram_gb": {
+      "default": 2,
+      "minimum": 0.5,
+      "title": "Min Free Ram Gb",
+      "type": "number"
+    },
+    "min_free_disk_gb": {
+      "default": 5,
+      "minimum": 1,
+      "title": "Min Free Disk Gb",
+      "type": "number"
+    },
+    "allow_publish": {
+      "default": false,
+      "title": "Allow Publish",
+      "type": "boolean"
+    },
+    "request_timeout_seconds": {
+      "default": 15,
+      "maximum": 30,
+      "minimum": 3,
+      "title": "Request Timeout Seconds",
+      "type": "integer"
+    },
+    "lease_safety_seconds": {
+      "default": 20,
+      "maximum": 60,
+      "minimum": 10,
+      "title": "Lease Safety Seconds",
+      "type": "integer"
+    },
+    "progress_seconds": {
+      "default": 30,
+      "maximum": 60,
+      "minimum": 20,
+      "title": "Progress Seconds",
+      "type": "integer"
+    },
+    "max_processing_seconds": {
+      "default": 1800,
+      "maximum": 1800,
+      "minimum": 60,
+      "title": "Max Processing Seconds",
+      "type": "integer"
+    },
+    "devices": {
+      "items": {
+        "$ref": "#/$defs/DeviceConfig"
+      },
+      "maxItems": 10,
+      "title": "Devices",
+      "type": "array"
+    }
+  },
+  "required": [
+    "worker_id"
+  ],
+  "title": "Config",
+  "type": "object"
+}

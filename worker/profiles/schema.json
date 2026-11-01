@@ -1,0 +1,295 @@
+{
+  "$defs": {
+    "Locator": {
+      "additionalProperties": false,
+      "properties": {
+        "by": {
+          "enum": [
+            "id",
+            "accessibility id",
+            "xpath",
+            "-android uiautomator"
+          ],
+          "title": "By",
+          "type": "string"
+        },
+        "value": {
+          "maxLength": 3000,
+          "minLength": 1,
+          "title": "Value",
+          "type": "string"
+        },
+        "attribute": {
+          "default": "text",
+          "title": "Attribute",
+          "type": "string"
+        }
+      },
+      "required": [
+        "by",
+        "value"
+      ],
+      "title": "Locator",
+      "type": "object"
+    },
+    "Step": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "enum": [
+            "click",
+            "input",
+            "wait",
+            "back"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "locator": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Locator"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "source": {
+          "anyOf": [
+            {
+              "enum": [
+                "caption",
+                "title",
+                "filename"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source"
+        },
+        "timeout_seconds": {
+          "default": 15,
+          "maximum": 30,
+          "minimum": 1,
+          "title": "Timeout Seconds",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "Step",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "platform": {
+      "enum": [
+        "tiktok",
+        "instagram",
+        "youtube"
+      ],
+      "title": "Platform",
+      "type": "string"
+    },
+    "package": {
+      "pattern": "^[A-Za-z][A-Za-z0-9_.]+$",
+      "title": "Package",
+      "type": "string"
+    },
+    "app_version": {
+      "minLength": 1,
+      "title": "App Version",
+      "type": "string"
+    },
+    "locale": {
+      "minLength": 2,
+      "title": "Locale",
+      "type": "string"
+    },
+    "navigation_verified": {
+      "default": false,
+      "title": "Navigation Verified",
+      "type": "boolean"
+    },
+    "account_steps": {
+      "items": {
+        "$ref": "#/$defs/Step"
+      },
+      "title": "Account Steps",
+      "type": "array"
+    },
+    "account": {
+      "$ref": "#/$defs/Locator"
+    },
+    "upload_steps": {
+      "items": {
+        "$ref": "#/$defs/Step"
+      },
+      "minItems": 1,
+      "title": "Upload Steps",
+      "type": "array"
+    },
+    "metadata_steps": {
+      "items": {
+        "$ref": "#/$defs/Step"
+      },
+      "minItems": 1,
+      "title": "Metadata Steps",
+      "type": "array"
+    },
+    "submit": {
+      "$ref": "#/$defs/Locator"
+    },
+    "confirmation": {
+      "$ref": "#/$defs/Locator"
+    },
+    "verification_steps": {
+      "items": {
+        "$ref": "#/$defs/Step"
+      },
+      "title": "Verification Steps",
+      "type": "array"
+    },
+    "caption_proof": {
+      "$ref": "#/$defs/Locator"
+    },
+    "author_proof": {
+      "$ref": "#/$defs/Locator"
+    },
+    "published_url": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Locator"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "url_source": {
+      "default": "element",
+      "enum": [
+        "element",
+        "clipboard"
+      ],
+      "title": "Url Source",
+      "type": "string"
+    },
+    "errors": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Locator"
+      },
+      "propertyNames": {
+        "enum": [
+          "captcha",
+          "platform_block",
+          "login_required"
+        ]
+      },
+      "title": "Errors",
+      "type": "object"
+    },
+    "parameter_steps": {
+      "additionalProperties": {
+        "additionalProperties": {
+          "items": {
+            "$ref": "#/$defs/Step"
+          },
+          "type": "array"
+        },
+        "type": "object"
+      },
+      "title": "Parameter Steps",
+      "type": "object"
+    },
+    "default_parameters": {
+      "additionalProperties": true,
+      "title": "Default Parameters",
+      "type": "object"
+    },
+    "metrics_steps": {
+      "items": {
+        "$ref": "#/$defs/Step"
+      },
+      "title": "Metrics Steps",
+      "type": "array"
+    },
+    "metric_post_proof": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Locator"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "metrics": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Locator"
+      },
+      "propertyNames": {
+        "enum": [
+          "views",
+          "likes",
+          "comments",
+          "shares",
+          "saves",
+          "follower_delta",
+          "retention"
+        ]
+      },
+      "title": "Metrics",
+      "type": "object"
+    },
+    "max_duration_seconds": {
+      "exclusiveMinimum": 0,
+      "title": "Max Duration Seconds",
+      "type": "number"
+    },
+    "max_caption_chars": {
+      "exclusiveMinimum": 0,
+      "title": "Max Caption Chars",
+      "type": "integer"
+    },
+    "max_title_chars": {
+      "default": 100,
+      "exclusiveMinimum": 0,
+      "title": "Max Title Chars",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "platform",
+    "package",
+    "app_version",
+    "locale",
+    "account",
+    "upload_steps",
+    "metadata_steps",
+    "submit",
+    "confirmation",
+    "caption_proof",
+    "author_proof",
+    "max_duration_seconds",
+    "max_caption_chars"
+  ],
+  "title": "Profile",
+  "type": "object"
+}

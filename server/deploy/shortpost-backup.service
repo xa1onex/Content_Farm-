@@ -1,0 +1,10 @@
+[Unit]
+Description=Shortpost PostgreSQL backup
+Requires=docker.service
+After=docker.service
+[Service]
+Type=oneshot
+WorkingDirectory=/root/Documents/Codex/2026-11-01/files-pasted-by-the-user-root/outputs/autopost
+ExecStart=/bin/bash scripts/backup.sh
+UMask=0077
+Nice=15

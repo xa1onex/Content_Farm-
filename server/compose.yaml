@@ -1,0 +1,77 @@
+name: shortpost
+x-app: &app
+  image: shortpost-backend:local
+  build: .
+  env_file: .env
+  restart: unless-stopped
+  init: true
+  read_only: true
+  tmpfs:
+    - /tmp:size=32m,mode=1777
+  security_opt:
+    - no-new-privileges:true
+  cap_drop: [ALL]
+  mem_limit: 320m
+  cpus: 0.70
+  logging:
+    driver: json-file
+    options: {max-size: 10m, max-file: '3'}
+  depends_on:
+    db: {condition: service_healthy}
+  secrets: [drive_credentials]
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: shortpost
+      POSTGRES_USER: shortpost_owner
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    ports: ['127.0.0.1:55432:5432']
+    volumes: ['postgres_data:/var/lib/postgresql/data']
+    mem_limit: 384m
+    cpus: 0.50
+    command: ['postgres','-c','shared_buffers=64MB','-c','max_connections=60']
+    healthcheck:
+      test: ['CMD-SHELL','pg_isready -U shortpost_owner -d shortpost']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: '3'}
+  migrate:
+    <<: *app
+    restart: 'no'
+    command: ['alembic','upgrade','head']
+  api:
+    <<: *app
+    ports: ['127.0.0.1:8108:8000']
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    healthcheck:
+      test: ['CMD','python','-c',"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health',timeout=5)"]
+      interval: 30s
+      timeout: 7s
+      retries: 3
+  scheduler:
+    <<: *app
+    command: ['python','-m','app.scheduler.runtime']
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+  telegram:
+    <<: *app
+    profiles: [telegram]
+    command: ['python','-m','app.telegram_admin.runtime']
+    environment:
+      TELEGRAM_EXTENSION_CONFIG: /run/secrets/telegram_extension_config
+    secrets: [drive_credentials, telegram_extension_config]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+volumes:
+  postgres_data:
+secrets:
+  drive_credentials:
+    file: ./secrets/drive.json
+  telegram_extension_config:
+    file: ./secrets/telegram.json

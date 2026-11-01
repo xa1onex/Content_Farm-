@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "platform": "tiktok",
+  "package": "com.zhiliaoapp.musically",
+  "app_version": "SET_EXACT_APP_VERSION",
+  "locale": "en-US",
+  "navigation_verified": false,
+  "account_steps": [],
+  "account": {
+    "by": "id",
+    "value": "RECORD_FROM_YOUR_DEVICE:account_handle",
+    "attribute": "text"
+  },
+  "upload_steps": [
+    {
+      "action": "click",
+      "locator": {
+        "by": "id",
+        "value": "RECORD_FROM_YOUR_DEVICE:create",
+        "attribute": "text"
+      },
+      "source": null,
+      "timeout_seconds": 15
+    },
+    {
+      "action": "click",
+      "locator": {
+        "by": "xpath",
+        "value": "//*[@text=\"{filename}\"]",
+        "attribute": "text"
+      },
+      "source": null,
+      "timeout_seconds": 15
+    }
+  ],
+  "metadata_steps": [
+    {
+      "action": "input",
+      "locator": {
+        "by": "id",
+        "value": "RECORD_FROM_YOUR_DEVICE:caption",
+        "attribute": "text"
+      },
+      "source": "caption",
+      "timeout_seconds": 15
+    }
+  ],
+  "submit": {
+    "by": "id",
+    "value": "RECORD_FROM_YOUR_DEVICE:publish",
+    "attribute": "text"
+  },
+  "confirmation": {
+    "by": "id",
+    "value": "RECORD_FROM_YOUR_DEVICE:published_confirmation",
+    "attribute": "text"
+  },
+  "verification_steps": [],
+  "caption_proof": {
+    "by": "id",
+    "value": "RECORD_FROM_YOUR_DEVICE:post_caption",
+    "attribute": "text"
+  },
+  "author_proof": {
+    "by": "id",
+    "value": "RECORD_FROM_YOUR_DEVICE:post_author",
+    "attribute": "text"
+  },
+  "published_url": {
+    "by": "id",
+    "value": "RECORD_FROM_YOUR_DEVICE:real_share_url",
+    "attribute": "text"
+  },
+  "url_source": "element",
+  "errors": {},
+  "parameter_steps": {},
+  "default_parameters": {},
+  "metrics_steps": [],
+  "metric_post_proof": null,
+  "metrics": {},
+  "max_duration_seconds": 60.0,
+  "max_caption_chars": 2000,
+  "max_title_chars": 100
+}

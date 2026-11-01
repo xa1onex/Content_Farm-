@@ -1,0 +1,21 @@
+name: shortpost-content-farm
+services:
+  content-farm:
+    build: ./content_farm
+    env_file: ./content_farm/.env
+    environment:
+      JOB_DIR: /data/jobs
+      GDRIVE_TOKEN_FILE: /credentials/drive_token.json
+      GDRIVE_CLIENT_FILE: /credentials/oauth_client.json
+      GDRIVE_SERVICE_FILE: /credentials/service_account.json
+      BG_VIDEO: /assets/background.mp4
+    volumes:
+      - farm_data:/data
+      - ./content_farm/runtime/credentials:/credentials
+      - ./content_farm/runtime/assets:/assets:ro
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: '3'}
+volumes:
+  farm_data:

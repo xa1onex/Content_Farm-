@@ -1,0 +1,10 @@
+aiogram>=3.31,<4
+python-dotenv>=1.2,<2
+google-genai>=2.29,<3
+yt-dlp[default]>=2026.8.19
+openai-whisper==20250625
+torch>=2.3,<3
+google-api-python-client>=2,<3
+google-auth-httplib2>=0.2,<1
+google-auth-oauthlib>=1.2,<2
+Pillow>=11,<13

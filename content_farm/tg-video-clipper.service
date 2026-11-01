@@ -1,0 +1,28 @@
+[Unit]
+Description=Telegram video clipper
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/tg-video-clipper
+ExecStart=/root/tg-video-clipper/venv/bin/python /root/tg-video-clipper/bot.py
+Environment=PYTHONUNBUFFERED=1
+Environment=OMP_NUM_THREADS=2
+Environment=MKL_NUM_THREADS=2
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+KillMode=control-group
+UMask=0077
+Nice=10
+CPUQuota=180%
+MemoryMax=2G
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/root/tg-video-clipper
+
+[Install]
+WantedBy=multi-user.target

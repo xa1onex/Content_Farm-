@@ -1,0 +1,13 @@
+.env
+runtime
+jobs
+downloads
+outputs
+backups
+venv
+.venv
+__pycache__
+*.json
+*.mp4
+*.log
+cookies*.txt

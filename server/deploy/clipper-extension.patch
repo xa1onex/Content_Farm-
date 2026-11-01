@@ -1,0 +1,7 @@
+--- bot.py
++++ bot.py
+@@ -23,1 +23,4 @@
+ dp = Dispatcher()
++
++from autopost_admin_extension import install as install_autopost_admin
++install_autopost_admin(dp, '/etc/shortpost/telegram.json')

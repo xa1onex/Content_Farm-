@@ -1,0 +1,8 @@
+.env
+.venv/
+secrets/
+backups/
+__pycache__/
+.pytest_cache/
+.coverage
+htmlcov/
