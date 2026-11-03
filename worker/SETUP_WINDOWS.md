@@ -94,3 +94,8 @@ powershell -NoProfile -File .\scripts\install-autostart.ps1 -IncludeAppium
 ## 8. Масштабирование
 
 Сначала подтвердите одну платформу/один эмулятор, затем 2–3 экземпляра. Каждому устройству нужны уникальные external_id, instance_index, Android ID, systemPort. Поднимайте local/server max_parallel постепенно, наблюдая RAM и место. Worker прекращает новые claims при недостатке ресурсов. Начальный порог — 2 GiB доступной RAM и 5 GiB диска. Не клонируйте одинаковый Android ID без явной перепривязки.
+
+
+## Автоматическая подготовка приложений
+
+При запуске Worker устанавливает отсутствующие YouTube, TikTok, Google Drive, Instagram и ProxySocket из Google Play на всех включённых привязанных устройствах. Вход в Google выполняется вручную. Подробности, отдельная команда проверки и отчёт: [APP_PROVISIONING.md](APP_PROVISIONING.md).

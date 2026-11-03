@@ -242,6 +242,15 @@ class Engine:
                     self.journal.metric_state(task['publication_id'],task['hours'],False)
                 finally:
                     if session:await asyncio.to_thread(session.close)
+    async def prepare_apps(self):
+        # Recovery takes priority. An unresolved publication must never be disturbed by Play UI.
+        if not self.config.auto_install_apps or self.journal.jobs(unfinished=True):return
+        if not any(d.enabled for d in self.config.devices):return
+        from .provisioning import prepare_devices
+        result=await asyncio.to_thread(prepare_devices,self.config,self.journal,
+            stop_requested=lambda:self.api.auth_failed.is_set() or self.journal.control('stop')=='1')
+        if not all(d['ready'] for d in result['devices']):raise WorkerError('required_apps_not_ready')
+
     async def run(self,live=False):
         if live:
             enabled=[d for d in self.config.devices if d.enabled]
@@ -255,9 +264,11 @@ class Engine:
         await self.api.heartbeat(self.devices.heartbeat_devices())
         await self.recover()
         heartbeat=asyncio.create_task(self.heartbeat_loop())
-        analytics=asyncio.create_task(self.analytics_loop())
+        analytics=None
         last_recovery=time.monotonic()
         try:
+            await self.prepare_apps()
+            analytics=asyncio.create_task(self.analytics_loop())
             while self.journal.control('stop')!='1' and not self.api.auth_failed.is_set():
                 if time.monotonic()-last_recovery>60:
                     try:await self.recover({getattr(t,'shortpost_job',None) for t in self.tasks})
@@ -287,6 +298,7 @@ class Engine:
             if self.tasks:await asyncio.gather(*self.tasks,return_exceptions=True)
             self.stopping=True
             for task in (heartbeat,analytics):
+                if task is None:continue
                 task.cancel()
                 try:await task
                 except asyncio.CancelledError:pass

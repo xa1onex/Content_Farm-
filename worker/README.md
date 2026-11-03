@@ -12,3 +12,8 @@ Python 3.12+ executor для существующего API. Приоритет 
 - Outbox результата/аналитики, recovery без повторного Submit, метрики на 24/48 часов.
 
 Инструкции: [SETUP_WINDOWS.md](SETUP_WINDOWS.md). Реальные платформы пока не приняты на Windows: [TEST_REPORT.md](TEST_REPORT.md). Шаблоны профилей не являются рабочими селекторами конкретной версии приложения.
+
+
+## Автоматическая подготовка приложений
+
+При запуске Worker устанавливает отсутствующие YouTube, TikTok, Google Drive, Instagram и ProxySocket из Google Play на всех включённых привязанных устройствах. Вход в Google выполняется вручную. Подробности, отдельная команда проверки и отчёт: [APP_PROVISIONING.md](APP_PROVISIONING.md).

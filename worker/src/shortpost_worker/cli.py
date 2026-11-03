@@ -26,6 +26,11 @@ def parser():
     for name in ('inspect-ui','record-locator'):
         node=sub.add_parser(name);node.add_argument('--external-id',required=True)
         if name=='record-locator':node.add_argument('--output',required=True,type=Path)
+    prepare=sub.add_parser('provision-apps')
+    targets=prepare.add_mutually_exclusive_group(required=True)
+    targets.add_argument('--all',action='store_true')
+    targets.add_argument('--external-id')
+    prepare.add_argument('--check-only',action='store_true')
     nav=sub.add_parser('test-navigation');nav.add_argument('--external-id',required=True)
     nav.add_argument('--platform',required=True,choices=['tiktok','instagram','youtube'])
     nav.add_argument('--username',required=True);nav.add_argument('--video',required=True,type=Path)
@@ -78,6 +83,11 @@ def main():
                     'jobs':[{k:r[k] for k in ('job_id','attempt','device','stage','irreversible_at','updated')} for r in journal.jobs()],
                     'outbox_pending':len(journal.pending()),'analytics_pending':len(journal.due_metrics(float('inf')))},indent=2));return
             with portalocker.Lock(config.state_dir/'worker.lock',timeout=0):
+                if args.command=='provision-apps':
+                    from .provisioning import prepare_devices
+                    result=prepare_devices(config,journal,external_id=args.external_id,check_only=args.check_only)
+                    if not all(d['ready'] for d in result['devices']):raise SystemExit(2)
+                    return
                 if args.command=='bind':
                     if args.instance<0:raise RuntimeError('Instance index must be nonnegative')
                     from .config import DeviceConfig

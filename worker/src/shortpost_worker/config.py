@@ -35,6 +35,8 @@ class Config(Strict):
     min_free_ram_gb:float=Field(default=2,ge=.5)
     min_free_disk_gb:float=Field(default=5,ge=1)
     allow_publish:bool=False
+    auto_install_apps:bool=True
+    play_install_timeout_seconds:int=Field(default=600,ge=30,le=1800)
     request_timeout_seconds:int=Field(default=15,ge=3,le=30)
     lease_safety_seconds:int=Field(default=20,ge=10,le=60)
     progress_seconds:int=Field(default=30,ge=20,le=60)
