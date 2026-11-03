@@ -76,8 +76,9 @@ class ADB:
     def stage_media(self,local_path,job_id,guard):
         from uuid import UUID
         filename=str(UUID(str(job_id)))+'.mp4'
-        destination='/sdcard/Movies/ShortPost/'+filename
-        guard.check();self.shell('mkdir','-p','/sdcard/Movies/ShortPost')
+        folder='/sdcard/Movies/ShortPost/'+filename[:-4]
+        destination=folder+'/'+filename
+        guard.check();self.shell('mkdir','-p',folder)
         self.run('push',str(local_path),destination,timeout=120)
         guard.check()
         size=self.shell('stat','-c','%s',destination)
@@ -85,7 +86,12 @@ class ADB:
         self.shell('am','broadcast','-a','android.intent.action.MEDIA_SCANNER_SCAN_FILE','-d','file://'+destination)
         return destination
     def remove_media(self,path):
-        if re.fullmatch(r'/sdcard/Movies/ShortPost/[a-f0-9-]{36}\.mp4',path):self.shell('rm','-f',path)
+        nested=re.fullmatch(r'/sdcard/Movies/ShortPost/([a-f0-9-]{36})/\1\.mp4',path)
+        legacy=re.fullmatch(r'/sdcard/Movies/ShortPost/[a-f0-9-]{36}\.mp4',path)
+        if nested or legacy:
+            self.shell('rm','-f',path)
+            self.shell('am','broadcast','-a','android.intent.action.MEDIA_SCANNER_SCAN_FILE','-d','file://'+path)
+            if nested:self.shell('rmdir',path.rsplit('/',1)[0])
 
 class Devices:
     def __init__(self,config,journal):

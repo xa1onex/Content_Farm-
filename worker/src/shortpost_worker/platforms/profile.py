@@ -11,7 +11,7 @@ class Locator(Strict):
 class Step(Strict):
     action:Literal['click','input','wait','back']
     locator:Locator|None=None
-    source:Literal['caption','title','filename']|None=None
+    source:Literal['caption','title','filename','media_album']|None=None
     timeout_seconds:int=Field(default=15,ge=1,le=30)
     @model_validator(mode='after')
     def fields(self):

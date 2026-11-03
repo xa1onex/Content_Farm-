@@ -46,7 +46,8 @@ class PlatformPublisher(abc.ABC):
         while True:
             self.guard.check();self.inspect_error()
             value=locator.value
-            if '{filename}' in value:value=value.replace('{filename}',self.context['filename'])
+            for key in ('filename','media_album'):
+                if '{'+key+'}' in value:value=value.replace('{'+key+'}',self.context[key])
             found=self.driver.find_elements(locator.by,value)
             if len(found)>1:raise UIError('ambiguous_ui_selector')
             if len(found)==1 and found[0].is_displayed():return found[0]
@@ -77,7 +78,8 @@ class PlatformPublisher(abc.ABC):
         title=self.parameters.get('title',assignment.content.title)
         if not isinstance(caption,str) or not isinstance(title,str) or not caption or len(caption)>self.profile.max_caption_chars or len(title)>self.profile.max_title_chars:
             raise UIError('invalid_publish_metadata')
-        self.context={'caption':caption,'title':title,'filename':str(assignment.job.id)+'.mp4'}
+        self.context={'caption':caption,'title':title,'filename':str(assignment.job.id)+'.mp4',
+                      'media_album':str(assignment.job.id)}
         self.validate_parameters()
         self.guard.check();self.driver.activate_app(self.profile.package)
         self.steps(self.profile.account_steps)

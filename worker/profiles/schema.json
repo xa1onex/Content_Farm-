@@ -62,7 +62,8 @@
               "enum": [
                 "caption",
                 "title",
-                "filename"
+                "filename",
+                "media_album"
               ],
               "type": "string"
             },

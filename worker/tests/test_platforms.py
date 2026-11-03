@@ -57,6 +57,18 @@ def test_journal_failure_prevents_submit(tmp_path):
     with pytest.raises(OSError):publisher.submit(fail)
     element.click.assert_not_called()
 
+def test_album_selector_resolves_assignment_and_rejects_multiple_thumbnails(tmp_path):
+    from shortpost_worker.platforms.profile import Locator,Step
+    driver=Mock();element=Mock();driver.find_elements.return_value=[element,element]
+    publisher=InstagramPublisher(profile('instagram'),driver,Mock(),Mock(),tmp_path)
+    album='00000000-0000-4000-8000-000000000001'
+    publisher.context={'media_album':album}
+    selector=Locator(by='xpath',value='//*[@text="{media_album}"]')
+    with pytest.raises(UIError,match='ambiguous_ui_selector'):
+        publisher.steps([Step(action='click',locator=selector)])
+    driver.find_elements.assert_called_with('xpath','//*[@text="'+album+'"]')
+    element.click.assert_not_called()
+
 def test_youtube_requires_explicit_audience_and_visibility(tmp_path):
     p=YouTubePublisher(profile('youtube'),Mock(),Mock(),Mock(),tmp_path);p.context={'title':'Test'}
     for parameters in ({},{'visibility':'public'},{'visibility':'public','made_for_kids':'false'}):

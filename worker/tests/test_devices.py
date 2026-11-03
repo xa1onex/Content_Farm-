@@ -11,6 +11,34 @@ def test_adb_version_parser_uses_actual_package_output():
     adb=ADB('adb','127.0.0.1:16384');adb.shell=Mock(return_value='versionName=36.4.3\n versionCode=123')
     assert adb.version('com.example.app')=='36.4.3'
 
+def test_staged_jobs_have_separate_gallery_albums(tmp_path):
+    video=tmp_path/'clip.mp4';video.write_bytes(b'video')
+    adb=ADB('adb','device');adb.run=Mock()
+    adb.shell=Mock(side_effect=lambda *args,**kwargs:'5' if args[0]=='stat' else '')
+    first='00000000-0000-4000-8000-000000000001'
+    second='00000000-0000-4000-8000-000000000002'
+    a=adb.stage_media(video,first,Mock());b=adb.stage_media(video,second,Mock())
+    assert a==f'/sdcard/Movies/ShortPost/{first}/{first}.mp4'
+    assert Path(a).parent!=Path(b).parent
+
+def test_incomplete_android_copy_is_rejected_before_gallery_scan(tmp_path):
+    video=tmp_path/'clip.mp4';video.write_bytes(b'video')
+    adb=ADB('adb','device');adb.run=Mock();adb.shell=Mock(return_value='4')
+    with pytest.raises(WorkerError,match='android_media_size_mismatch'):
+        adb.stage_media(video,'00000000-0000-4000-8000-000000000001',Mock())
+    assert not any(c.args[0]=='am' for c in adb.shell.call_args_list)
+
+def test_cleanup_cannot_remove_other_jobs_or_general_gallery_files():
+    adb=ADB('adb','device');adb.shell=Mock()
+    first='00000000-0000-4000-8000-000000000001'
+    second='00000000-0000-4000-8000-000000000002'
+    for path in ['/sdcard/DCIM/clip.mp4',f'/sdcard/Movies/ShortPost/{first}/{second}.mp4',f'/sdcard/Movies/ShortPost/{first}/../clip.mp4']:
+        adb.remove_media(path)
+    adb.shell.assert_not_called()
+    adb.remove_media(f'/sdcard/Movies/ShortPost/{first}/{first}.mp4')
+    assert adb.shell.call_args_list[0].args==('rm','-f',f'/sdcard/Movies/ShortPost/{first}/{first}.mp4')
+    assert adb.shell.call_args_list[-1].args==('rmdir',f'/sdcard/Movies/ShortPost/{first}')
+
 def test_mumu_reads_real_port_instead_of_guessing(monkeypatch):
     monkeypatch.setattr('shortpost_worker.devices.command',lambda args:json.dumps({'0':{'index':'0','adb_port':17321,'adb_host_ip':'127.0.0.1','is_android_started':True}}))
     assert MuMu('MuMuManager.exe').endpoint(0)=='127.0.0.1:17321'
