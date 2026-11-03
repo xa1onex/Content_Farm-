@@ -1,6 +1,6 @@
 # Контент-ферма в монорепозитории
 
-Этот каталог — snapshot исходников действующей Linux-фермы из `/root/tg-video-clipper`. Работающий экземпляр не редактировался и не перезапускался. Алгоритмы нарезки, Gemini/Whisper models и существующие обработчики сохранены.
+Этот каталог содержит исходники Linux-фермы из `/root/tg-video-clipper`, включая постоянные ID роликов, восстановление после временных ошибок Gemini и регистрацию результатов в ShortPost. Модели Gemini/Whisper и композиция роликов сохранены.
 
 На Windows этот компонент запускается через WSL2/Docker Desktop, поскольку исходный bot использует fcntl и Linux fonts. Он не входит в Windows Worker virtualenv. Нативный Windows Worker запускается отдельно из `worker/`.
 
@@ -14,4 +14,4 @@ docker compose -f compose.content-farm.yaml up -d --build
 
 Пользовательские видео и фоновый файл из live-проекта не публикуются в Git. Для начала задайте `VIDEO_LAYOUT=portrait` (фон не нужен) либо положите свой разрешённый background.mp4 в `runtime/assets` и используйте split. Docker устанавливает DejaVu font и FFmpeg, необходимые существующему алгоритму.
 
-Исходная инструкция: `README.md`. Передача метаданных в сервер: `server/scripts/register_clipper.py` и `server/docs/INTEGRATIONS.md`. Постоянные Google credentials в Worker не передаются.
+Инструкция: `README.md`, раздел «Постоянные ID и передача в ShortPost». Автоматическая передача реализована в `autopost.py`; `server/scripts/register_clipper.py` остаётся отдельным инструментом ручного импорта. Постоянные Google credentials в Worker не передаются.

@@ -112,3 +112,10 @@ def test_auto_passport_skips_an_existing_external_id(client,seeded):
     response=client.post('/api/v1/content',json=body,headers=auth('farm'))
     assert response.status_code==201
     assert response.json()['passport']=='ENTERTAINMENT-REACTION-000002'
+
+def test_content_lookup_by_sha256_is_exact(client,seeded):
+    yes=client.get('/api/v1/content',params={'sha256':'a'*64},headers=auth('farm'))
+    assert yes.status_code==200 and len(yes.json()['items'])==1
+    no=client.get('/api/v1/content',params={'sha256':'b'*64},headers=auth('farm'))
+    assert no.status_code==200 and no.json()['items']==[]
+    assert client.get('/api/v1/content',params={'sha256':'invalid'},headers=auth('farm')).status_code==422

@@ -17,9 +17,10 @@ from aiogram.exceptions import TelegramAPIError, TelegramRetryAfter
 from aiogram.filters import Command, CommandStart
 from aiogram.types import FSInputFile
 
-from config import BASE_DIR, JOB_DIR, MAX_QUEUE_SIZE, TELEGRAM_INPUT_BYTES
+from config import BASE_DIR, JOB_DIR, MAX_QUEUE_SIZE, TELEGRAM_INPUT_BYTES, AUTOPOST_ENABLED
 from drive_helper import archive_job, save_private_json
-from processor import process_job, ProcessingError
+from processor import process_job, ProcessingError, TransientProcessingError
+from autopost import register_job
 from sources import parse_source
 
 log = logging.getLogger(__name__)
@@ -105,6 +106,7 @@ async def deliver(bot, job_dir):
             from drive_helper import DriveStorage
             await asyncio.to_thread(lambda:DriveStorage().download(record['id'],local))
         caption = html.escape(clip['description'])
+        if clip.get('id'):caption += '\nID: <code>'+html.escape(clip['id'])+'</code>'
         if record:
             caption += f'\n<a href="{html.escape(record["link"],quote=True)}">Сохранено на Google Диске</a>'
         try:
@@ -140,11 +142,11 @@ async def download_telegram(bot,job_dir,source):
 
 def clean_archived_job(job_dir):
     state = load_state(job_dir)
-    if not state.get('archived') or not state.get('delivered'):
+    if not state.get('archived') or not state.get('delivered') or (AUTOPOST_ENABLED and not state.get('registered')):
         return
     # State, links, manifest and captions remain for /files and recovery.
     for path in job_dir.iterdir():
-        if path.is_file() and path.name not in {'state.json','manifest.json'}:
+        if path.is_file() and path.name not in {'state.json','manifest.json','autopost_requests.json'}:
             path.unlink(missing_ok=True)
 
 async def worker(bot):
@@ -171,22 +173,43 @@ async def worker(bot):
             except Exception as exc:
                 log.exception('Archive failed for %s',state['id'])
                 state = update_state(job_dir,archived=False,archive_error=type(exc).__name__)
+            if state.get('archived') and AUTOPOST_ENABLED:
+                reporter.notify('Регистрирую ID роликов и проверяю доступ для автопостинга…')
+                try:
+                    await asyncio.to_thread(register_job,job_dir)
+                except Exception as exc:
+                    log.error('Registration failed for %s: %s',state['id'],type(exc).__name__)
+                    update_state(job_dir,registered=False,autopost_error=type(exc).__name__)
             reporter.notify('Отправляю готовые ролики…')
             await deliver(bot,job_dir)
             state = load_state(job_dir)
             reporter.done = True
-            if state.get('archived') and state.get('delivered'):
+            if state.get('archived') and state.get('delivered') and (not AUTOPOST_ENABLED or state.get('registered')):
                 update_state(job_dir,status='completed')
                 clean_archived_job(job_dir)
                 await reporter.edit('✅ Ролики отправлены. Исходник, субтитры и результаты сохранены на Google Диске.',final=True)
             else:
                 update_state(job_dir,status='needs_retry')
-                issue = 'Google Диск пока недоступен' if not state.get('archived') else 'не все ролики доставлены в Telegram'
+                issue = ('Google Диск пока недоступен' if not state.get('archived') else
+                         'регистрация для автопостинга не завершена' if AUTOPOST_ENABLED and not state.get('registered') else
+                         'не все ролики доставлены в Telegram')
                 await reporter.edit(f'⚠️ Ролики созданы, но {issue}. Файлы сохранены на сервере.\n'
                            f'Повторить сохранение и доставку: /retry {state["id"]}',final=True)
         except asyncio.CancelledError:
             update_state(job_dir,status='interrupted')
             raise
+        except TransientProcessingError as exc:
+            count = state.get('auto_retry_count',0)+1
+            reporter.done = True
+            if count<=5:
+                delay = [60,180,600,1800,3600][count-1]
+                update_state(job_dir,status='retry_wait',error='gemini_temporarily_unavailable',
+                             auto_retry_count=count,retry_at=time.time()+delay)
+                await reporter.edit(f'⏳ Gemini временно перегружен. Исходник и расшифровка сохранены. '
+                                    f'Повторю автоматически через {delay//60} мин. ID: <code>{state["id"]}</code>',final=True)
+            else:
+                update_state(job_dir,status='needs_retry',error='gemini_temporarily_unavailable',auto_retry_count=count)
+                await reporter.edit(f'⚠️ Gemini пока недоступен. Все файлы сохранены. Повтор: /retry {state["id"]}',final=True)
         except Exception as exc:
             log.exception('Job %s failed',state['id'])
             update_state(job_dir,status='failed',error=type(exc).__name__)
@@ -221,7 +244,7 @@ async def status(message:types.Message):
         return
     labels = {'queued':'в очереди','processing':'обрабатывается','completed':'готово',
         'failed':'ошибка','needs_retry':'нужен повтор сохранения/отправки',
-        'interrupted':'возобновляется','receiving':'получаю файл'}
+        'interrupted':'возобновляется','receiving':'получаю файл','retry_wait':'ожидает автоматического повтора Gemini'}
     await message.answer('\n'.join(f'<code>{s["id"]}</code>: {labels.get(s["status"],s["status"])}' for _,s in jobs))
 
 @dp.message(Command('files'))
@@ -229,7 +252,7 @@ async def files(message:types.Message):
     lines = []
     for _,state in user_jobs(message.from_user.id)[:5]:
         for name,record in state.get('drive_files',{}).items():
-            if name.startswith('short_'):
+            if name.startswith(('short_','CF-')) and name.endswith('.mp4'):
                 lines.append(f'<a href="{html.escape(record["link"],quote=True)}">{state["id"]} · {name}</a>')
     await message.answer('\n'.join(lines) if lines else 'На Google Диске пока нет сохранённых результатов твоих заданий.')
 
@@ -253,7 +276,7 @@ async def retry(message:types.Message):
         if load_state(job_dir).get('status')=='completed':
             await message.answer('Задание уже сохранено и доставлено. Ссылки: /files')
             return
-        update_state(job_dir,status='queued')
+        update_state(job_dir,status='queued',retry_at=None,auto_retry_count=0)
         busy_users.add(message.from_user.id);scheduled.add(parts[1])
         queue.put_nowait(job_dir)
         await message.answer(f'Задание <code>{parts[1]}</code> добавлено в очередь.')
@@ -315,6 +338,16 @@ async def submit(message:types.Message,bot:Bot):
 def math_ceil(value):
     return int(value)+int(value>int(value))
 
+async def delayed_retries():
+    while True:
+        for job_dir,state in user_jobs_all():
+            if (state.get('status')=='retry_wait' and (state.get('retry_at') or 0)<=time.time()
+                    and state['user_id'] not in busy_users and state['id'] not in scheduled and not queue.full()):
+                update_state(job_dir,status='queued')
+                busy_users.add(state['user_id']);scheduled.add(state['id'])
+                queue.put_nowait(job_dir)
+        await asyncio.sleep(5)
+
 async def main():
     token = os.getenv('BOT_TOKEN')
     if not token:
@@ -327,6 +360,7 @@ async def main():
         raise RuntimeError('Another bot instance is already running')
     bot = Bot(token=token,default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     task = asyncio.create_task(worker(bot))
+    retry_task = None
     try:
         await bot.set_my_commands([
             types.BotCommand(command='start',description='Как пользоваться ботом'),
@@ -337,8 +371,13 @@ async def main():
             if state.get('status') in {'receiving','queued','processing','interrupted'}:
                 busy_users.add(state['user_id']);scheduled.add(state['id'])
                 await queue.put(job_dir)
+        retry_task = asyncio.create_task(delayed_retries())
         await dp.start_polling(bot,close_bot_session=False)
     finally:
+        if retry_task:
+            retry_task.cancel()
+            try:await retry_task
+            except asyncio.CancelledError:pass
         task.cancel()
         try:
             await task

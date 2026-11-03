@@ -6,9 +6,15 @@
 |---|---|---|
 | `server/` | Существующий ShortPost: FastAPI, PostgreSQL, очередь, расписание, аналитика и Telegram-модуль | Linux / Docker |
 | `worker/` | Новый локальный исполнитель: API, SQLite journal, DPAPI, MuMu/ADB/Appium, платформенные адаптеры | Windows 10/11, интерактивный пользователь |
-| `content_farm/` | Исходники действующей фермы нарезки, скопированные без изменения её работающего экземпляра | Linux; на Windows — WSL2 / Docker Desktop |
+| `content_farm/` | Ферма нарезки: создание роликов, постоянные ID, Google Диск и регистрация в ShortPost | Linux; на Windows — WSL2 / Docker Desktop |
 
-Сервер уже доступен по `https://origin.xdoublegroup.online:8443/api/v1`. Для Windows Worker **не нужно разворачивать сервер и PostgreSQL на ПК**. Backend и его контракт не переписывались. Спецификация: [WORKER_API_SPEC.md](docs/WORKER_API_SPEC.md), схема: [openapi.json](docs/openapi.json).
+Сервер доступен по `https://origin.xdoublegroup.online:8443/api/v1`. Для Windows Worker **не нужно разворачивать сервер и PostgreSQL на ПК**. Спецификация: [WORKER_API_SPEC.md](docs/WORKER_API_SPEC.md), схема: [openapi.json](docs/openapi.json).
+
+Ферма создаёт ролик → сохраняет `CF-<код>.mp4` на Google Диске → регистрирует его
+в ShortPost → сервер сверяет SHA-256 и доступ к файлу. Windows Worker получает
+задания и скачивает видео через сервер, затем работает с приложением в эмуляторе.
+ID сохраняется при повторе; одинаковые по содержимому файлы повторно не регистрируются.
+Настройка интеграции описана в [content_farm/README.md](content_farm/README.md).
 
 ## Быстрый старт Windows
 
@@ -42,7 +48,9 @@ API client, durable journal, восстановление, контроль leas
 
 Сначала настройте версию приложения, язык, устойчивые селекторы, account proof и результат публикации; выполните `test-navigation`, который останавливается перед Publish. Живые публикации требуют `allow_publish=true` и явного `run --live`. Один только запуск установки или обычного `run` ничего не публикует. Инструкция: [PLATFORM_ADAPTERS.md](worker/PLATFORM_ADAPTERS.md).
 
-По предыдущему развёртыванию Drive и включение Telegram-модуля на работающем сервере остаются отдельными подключениями, требующими разрешённых credentials/установки. Наличие исходников в GitHub не подключает эти интеграции автоматически.
+Авторизация Google Диска на сервере настраивается отдельно: ферме нужен доступ
+на запись, серверу выдачи — на чтение. Наличие исходников в GitHub не подключает
+эти интеграции автоматически.
 
 ## Управление Worker
 

@@ -21,6 +21,9 @@ _whisper = None
 class ProcessingError(RuntimeError):
     pass
 
+class TransientProcessingError(ProcessingError):
+    pass
+
 def run_ffmpeg(args, timeout=1800):
     try:
         result = subprocess.run(['ffmpeg','-nostdin','-hide_banner','-loglevel','error',
@@ -195,7 +198,7 @@ Return a JSON array of objects with start_time, end_time, description.
         'description':{'type':'string'}},
         'required':['start_time','end_time','description']}}
     last = None
-    with genai.Client(api_key=key, http_options=types.HttpOptions(timeout=180000)) as client:
+    with genai.Client(api_key=key, http_options=types.HttpOptions(timeout=180000,retry_options=types.HttpRetryOptions(attempts=1))) as client:
         for attempt in range(3):
             try:
                 response = client.models.generate_content(model=GEMINI_MODEL,contents=prompt,
@@ -214,6 +217,8 @@ Return a JSON array of objects with start_time, end_time, description.
                 prompt += '\nYour previous answer was invalid. Check all timestamps, duration and completeness.'
             if attempt < 2:
                 time.sleep(2**(attempt+1))
+    if isinstance(last, APIError) and last.code in (429,500,502,503,504):
+        raise TransientProcessingError('Gemini временно перегружен. Исходник и расшифровка сохранены; задание будет повторено.') from last
     raise ProcessingError('ИИ не смог выбрать подходящие моменты. Попробуй другое видео.') from last
 
 def build_short(video_path, start, end, index, job_dir, transcript):
@@ -330,10 +335,16 @@ def process_job(job_dir, progress=lambda text:None):
     selection_file = job_dir/'selection.json'
     segments = validate_segments(json.loads(selection_file.read_text()),duration) if selection_file.exists() else analyze_with_gemini(transcript,duration)
     save_private_json(selection_file,segments)
+    from clip_identity import finish_output
     clips = []
     for i,seg in enumerate(segments):
         progress(f'Создаю ролик {i+1} из {len(segments)} и добавляю субтитры…')
-        final = job_dir/f'short_{i+1:02d}.mp4'
+        current_state = json.loads((job_dir/'state.json').read_text())
+        receipt = current_state.get('clip_outputs',{}).get(str(i))
+        final = job_dir/receipt['file'] if receipt else job_dir/f'short_{i+1:02d}.mp4'
+        if receipt and not final.exists():
+            pending = job_dir/f'short_{i+1:02d}.mp4'
+            if pending.exists():final=pending
         if final.exists():
             try:
                 data = probe(final)
@@ -343,8 +354,8 @@ def process_job(job_dir, progress=lambda text:None):
                 final.unlink(missing_ok=True)
         if not final.exists():
             final = build_short(video,seg['start_time'],seg['end_time'],i,job_dir,transcript)
-        clips.append({**seg,'file':final.name})
-    manifest = {'title':details.get('title','Видео'),'source':source,
+        clips.append(finish_output(job_dir,i,final,seg))
+    manifest = {'job_id':state['id'],'identity_version':1,'title':details.get('title','Видео'),'source':source,
         'duration':duration,'composition':{'layout':VIDEO_LAYOUT,
             'background':BG_VIDEO.name if VIDEO_LAYOUT=='split' else None,
             'fps':60 if VIDEO_LAYOUT=='split' else 30,'ends_with_primary':True},

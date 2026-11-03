@@ -53,8 +53,9 @@ def source(source_id:UUID,s=DB,actor=FARM):return record(require(s,Source,source
 
 @router.get('/content')
 def content(status:Literal['draft','ready','unavailable','archived']|None=None,category_id:UUID|None=None,drive_file_id:str|None=None,
-    limit:int=Query(50,ge=1,le=200),offset:int=Query(0,ge=0),s=DB,actor=FARM):
+    limit:int=Query(50,ge=1,le=200),offset:int=Query(0,ge=0),sha256:str|None=Query(default=None,pattern=r'^[0-9a-f]{64}$'),s=DB,actor=FARM):
     filters=[]
+    if sha256:filters.append(Clip.sha256==sha256)
     if status:filters.append(Clip.status==status)
     if category_id:filters.append(Clip.category_id==category_id)
     if drive_file_id:filters.append(Clip.drive_file_id==drive_file_id)

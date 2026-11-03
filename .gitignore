@@ -26,6 +26,8 @@
 **/*.mov
 **/*.dump
 **/drive_token.json
+**/autopost_credentials.json
+**/private_backups/
 **/oauth_client.json
 **/service_account.json
 **/cookies*.txt

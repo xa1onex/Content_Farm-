@@ -18,15 +18,7 @@ SCOPES = ['https://www.googleapis.com/auth/drive']
 class DriveConfigurationError(RuntimeError):
     pass
 
-def save_private_json(path, value):
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_suffix(path.suffix + '.tmp')
-    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    os.fchmod(fd,0o600)
-    with os.fdopen(fd, 'w', encoding='utf-8') as out:
-        json.dump(value, out, ensure_ascii=False, indent=2)
-    os.replace(temp, path)
+from drive_helper_json import save_private_json
 
 class DriveStorage:
     def __init__(self):
@@ -109,7 +101,7 @@ class DriveStorage:
 
     def metadata(self, file_id):
         info = self.service.files().get(fileId=file_id, supportsAllDrives=True,
-            fields='id,name,mimeType,size,parents,trashed,capabilities(canDownload)').execute(num_retries=3)
+            fields='id,name,mimeType,size,parents,trashed,sha256Checksum,capabilities(canDownload)').execute(num_retries=3)
         if info.get('trashed'):
             raise ValueError('Файл удалён с Google Диска.')
         parents = info.get('parents', [])
@@ -150,22 +142,58 @@ class DriveStorage:
         return info
 
 def archive_job(job_dir):
+    from clip_identity import normalize_job, checksum
     job_dir = Path(job_dir)
     state_path = job_dir / 'state.json'
-    state = json.loads(state_path.read_text())
     drive = DriveStorage()
+    manifest = normalize_job(job_dir, drive.metadata)
+    state = json.loads(state_path.read_text())
     folder = state.get('drive_folder_id') or drive.job_folder(state['user_id'], state['id'])
     state['drive_folder_id'] = folder
     state.setdefault('drive_files', {})
     save_private_json(state_path, state)
-    files = [p for p in job_dir.glob('source.*') if p.stem=='source'] + list(job_dir.glob('short_*.mp4'))
-    files += [job_dir / n for n in ['transcript.json','selection.json','manifest.json']
-              if (job_dir / n).exists()]
+    clips = (manifest or {}).get('clips', [])
+    for clip in clips:
+        path = job_dir / clip['file']
+        record = state['drive_files'].get(clip['file'])
+        if not record:
+            # Reuse an already registered identical clip before uploading another copy.
+            from autopost import find_existing_clip
+            known = find_existing_clip(clip['sha256'])
+            if known:
+                info = drive.metadata(known['drive_file_id'])
+                if info.get('sha256Checksum') != clip['sha256']:
+                    raise ValueError('SHA-256 ранее сохранённого ролика не совпадает.')
+                record = {'id':known['drive_file_id'],
+                          'link':'https://drive.google.com/file/d/'+known['drive_file_id']+'/view',
+                          'reused':True}
+            else:
+                record = drive.upload(path, folder)
+            state['drive_files'][clip['file']] = record
+            save_private_json(state_path, state)
+        if record.get('identity_version') != 1:
+            drive.service.files().update(fileId=record['id'],body={
+                'name':clip['file'],'appProperties':{'clip_id':clip['id'],
+                'sha256':clip['sha256'],'farm_job_id':state['id']}},
+                supportsAllDrives=True,fields='id').execute(num_retries=3)
+            record.update(sha256=clip['sha256'],clip_id=clip['id'],identity_version=1)
+            save_private_json(state_path, state)
+        clip.update(drive_file_id=record['id'],drive_url=record['link'])
+    if manifest is not None:
+        save_private_json(job_dir/'manifest.json',manifest)
+    files = [p for p in job_dir.glob('source.*') if p.stem=='source']
+    if not clips:
+        files += list(job_dir.glob('short_*.mp4'))  # Legacy empty test/partial manifests.
+    files += [job_dir/n for n in ('transcript.json','selection.json','manifest.json') if (job_dir/n).exists()]
     files += list(job_dir.glob('subs_*.ass'))
     for path in files:
-        if path.name in state['drive_files']:
+        sha = checksum(path)
+        record = state['drive_files'].get(path.name)
+        if record and record.get('sha256') == sha:
             continue
-        record = drive.upload(path, folder)
+        # Reuse the same Drive file ID when updating sidecar manifests after a retry.
+        record = drive.upload(path,folder,file_id=record['id']) if record else drive.upload(path,folder)
+        record['sha256'] = sha
         state['drive_files'][path.name] = record
         save_private_json(state_path, state)
     state['archived'] = True

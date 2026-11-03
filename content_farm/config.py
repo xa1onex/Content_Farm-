@@ -28,3 +28,10 @@ GDRIVE_FOLDER_ID = os.getenv('GDRIVE_FOLDER_ID', '').strip()
 GDRIVE_TOKEN_FILE = path_setting('GDRIVE_TOKEN_FILE', 'drive_token.json')
 GDRIVE_CLIENT_FILE = path_setting('GDRIVE_CLIENT_FILE', 'oauth_client.json')
 GDRIVE_SERVICE_FILE = path_setting('GDRIVE_SERVICE_FILE', 'service_account.json')
+
+# Server-side integration. The farm token is never shipped to Windows.
+AUTOPOST_ENABLED = os.getenv('AUTOPOST_ENABLED', 'false').lower() in {'1','true','yes'}
+AUTOPOST_API_URL = os.getenv('AUTOPOST_API_URL', 'https://origin.xdoublegroup.online:8443/api/v1').rstrip('/')
+AUTOPOST_TOKEN_FILE = path_setting('AUTOPOST_TOKEN_FILE', 'autopost_credentials.json')
+AUTOPOST_CATEGORY_ID = os.getenv('AUTOPOST_CATEGORY_ID', '').strip()
+AUTOPOST_FORMAT_ID = os.getenv('AUTOPOST_FORMAT_ID', '').strip()
