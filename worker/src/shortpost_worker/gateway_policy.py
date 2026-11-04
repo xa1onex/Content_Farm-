@@ -82,7 +82,7 @@ table inet shortpost_guard {
   }
   chain forward {
     type filter hook forward priority 0; policy drop;
-    iifname "eth1" oifname "sp-tun" ip saddr { ALLOWED } counter accept
+    iifname "eth1" oifname "sp-tun" ip saddr { ALLOWED } meta l4proto { tcp, udp } counter accept
     iifname "sp-tun" oifname "eth1" ip daddr { ALLOWED } counter accept
   }
 }

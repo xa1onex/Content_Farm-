@@ -38,6 +38,8 @@ def test_unknown_devices_and_ipv6_are_rejected_without_direct_fallback():
     assert config['route']['rules'][-1] == {'action': 'reject'}
     assert 'policy drop' in guard
     assert 'oifname "eth0"' not in guard
+    outbound = next(line for line in guard.splitlines() if 'oifname "sp-tun"' in line)
+    assert 'meta l4proto { tcp, udp }' in outbound
     assert 'dhcp-ignore=tag:!known' in dhcp
     assert 'option:router,10.77.0.1' in dhcp
 
