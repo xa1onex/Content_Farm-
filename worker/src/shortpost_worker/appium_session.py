@@ -11,11 +11,12 @@ class Session:
             'appium:noReset':True,'appium:fullReset':False,'appium:systemPort':self.device.system_port,
             'appium:newCommandTimeout':120,'appium:adbExecTimeout':30000,
             'appium:uiautomator2ServerInstallTimeout':60000})
-        config=AppiumClientConfig(remote_server_addr=self.device.appium_url,timeout=20,
+        config=AppiumClientConfig(remote_server_addr=self.device.appium_url,timeout=60,
             init_args_for_pool_manager={'init_args_for_pool_manager':{'retries':0}})
         try:
             self.driver=webdriver.Remote(options=options,client_config=config)
             self.driver.implicitly_wait(0)
+            self.driver.update_settings({'waitForIdleTimeout':1000,'waitForSelectorTimeout':1000})
             return self.driver
         except Exception:raise WorkerError('appium_unavailable') from None
     def close(self):

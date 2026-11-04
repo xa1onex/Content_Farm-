@@ -221,7 +221,10 @@ def job_action(job_id:UUID,data:JobAction,request:Request,s=DB,actor=ADMIN):
         if data.action=='resolve_published':
             if not data.external_id or not data.published_at:raise HTTPException(422,'external_id and published_at required')
             if data.published_at>now():raise HTTPException(422,'Publication cannot be in the future')
+            previous_error=job.result.get('error_code')
             queue.publish(s,job,data.external_id,data.url,data.published_at)
+            job.result={'outcome':'published','operator_verified':True,'external_id':data.external_id,
+                'url':data.url,'published_at':data.published_at.isoformat(),'recovered_from_error':previous_error}
         else:
             job.status='failed';job.result={'no_publish_attempted':True,'operator_verified':True,'reason':data.reason}
             job.lease_hash=None;job.lease_until=None

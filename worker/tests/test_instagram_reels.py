@@ -13,6 +13,8 @@ def native_profile():
 def publisher(tmp_path):
     p=InstagramPublisher(native_profile(),Mock(),Mock(),Mock(),tmp_path)
     p.assignment=SimpleNamespace(account=SimpleNamespace(username='example'))
+    p._settle=Mock()
+    p.driver.find_elements.return_value=[]
     p.context={'caption':'Описание ролика'};p.before_post_count=5;p.before_post_id='OLD_123'
     return p
 
@@ -73,11 +75,40 @@ def test_full_caption_is_required_and_new_clipboard_link_is_canonicalized(tmp_pa
     p._drag=Mock();p._click=Mock();p.driver.find_elements.return_value=[]
     p.driver.get_clipboard_text.return_value='https://www.instagram.com/reel/NEW_123/?igsh=test'
     assert p.read_open_reel(p.context['caption'])=={'external_id':'NEW_123','url':'https://www.instagram.com/reel/NEW_123/'}
-    p.driver.set_clipboard_text.assert_called_once();p.driver.back.assert_called_once()
-    p.text=Mock(side_effect=['example','example Другая подпись'])
+    p.driver.set_clipboard_text.assert_called_once()
+    assert p.driver.activate_app.call_args_list[0].args==('io.appium.settings',)
+    assert p.driver.activate_app.call_args_list[-1].args==('com.instagram.android',)
+    p.text=Mock(side_effect=['example','example Другая подпись','example Другая подпись'])
     with pytest.raises(UIError,match='publication_content_unverified'):p.read_open_reel(p.context['caption'])
 
 def test_xpath_literal_handles_quotes_without_changing_expression():
     assert xpath_literal('test')=="'test'"
     assert xpath_literal("it's")=='''"it's"'''
     assert xpath_literal('a\'b"c')=='''concat('a',"'",'b"c')'''
+
+
+def test_caption_can_use_accessibility_description_instead_of_text(tmp_path):
+    p=publisher(tmp_path);p.text=Mock(side_effect=['example','','example Описание ролика'])
+    p._drag=Mock();p._click=Mock();p.driver.find_elements.return_value=[]
+    p.driver.get_clipboard_text.return_value='https://www.instagram.com/reel/NEW_123/'
+    assert p.read_open_reel(p.context['caption'])['external_id']=='NEW_123'
+
+def test_transient_read_error_after_submit_retries_confirmation_only(tmp_path,monkeypatch):
+    from selenium.common.exceptions import StaleElementReferenceException
+    fake_clock(monkeypatch);p=publisher(tmp_path)
+    p._click=Mock(side_effect=[StaleElementReferenceException(),None]);p._profile_owner=Mock()
+    p._post_count=Mock(return_value=6);p._open_latest_reel=Mock();p._drag=Mock()
+    p.read_open_reel=Mock(return_value={'external_id':'NEW_123','url':'https://www.instagram.com/reel/NEW_123/'})
+    p.submit=Mock()
+    assert p.verify_publication()['external_id']=='NEW_123'
+    p.submit.assert_not_called()
+
+
+def test_share_sheet_is_closed_after_failed_clipboard_read(tmp_path):
+    p=publisher(tmp_path);p.text=Mock(side_effect=['example','example Описание ролика'])
+    p._drag=Mock();p._click=Mock()
+    button=Mock();button.is_displayed.return_value=True
+    p.driver.find_elements.side_effect=lambda by,value: [button] if 'Копировать ссылку' in value else []
+    p.driver.get_clipboard_text.side_effect=lambda:p.driver.set_clipboard_text.call_args.args[0]
+    with pytest.raises(UIError,match='publication_link_not_copied'):p.read_open_reel(p.context['caption'])
+    p.driver.back.assert_called_once()

@@ -59,3 +59,16 @@ def test_warmup_starts_only_when_fully_ready_and_never_resets(seeded):
         assert a.operational_started_at==started
         a.status='active';s.flush();start_ready_accounts(s)
         assert a.operational_started_at==started
+
+
+def test_verified_publication_resolution_clears_unknown_outcome(client,seeded):
+    from app.models import Job
+    with transaction() as s:
+        job=s.get(Job,seeded['job']);job.status='unknown';job.worker_id=seeded['worker'];job.device_id=seeded['device']
+        job.result={'outcome':'unknown','error_code':'worker_internal_error'}
+    result=client.post('/api/v1/jobs/'+str(seeded['job'])+'/action',headers=auth(),json={
+      'action':'resolve_published','external_id':'confirmed-post','url':'https://www.tiktok.com/@test/video/1234567890123456',
+      'published_at':now().isoformat(),'reason':'Verified author, complete caption and new link; no repeated submission'})
+    assert result.status_code==200,result.text
+    assert result.json()['status']=='published' and result.json()['result']['outcome']=='published'
+    assert result.json()['result']['operator_verified'] is True

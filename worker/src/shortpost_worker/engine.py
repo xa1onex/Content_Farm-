@@ -121,7 +121,7 @@ class Engine:
             await self.report(self.journal.job(identifier,attempt))
         except (Exception,asyncio.CancelledError) as exc:
             code=exc.code if isinstance(exc,WorkerError) else ('worker_cancelled' if isinstance(exc,asyncio.CancelledError) else 'worker_internal_error')
-            log.error('job_error code=%s job=%s attempt=%s',code,identifier,attempt)
+            log.error('job_error code=%s type=%s job=%s attempt=%s',code,type(exc).__name__,identifier,attempt)
             current=self.journal.job(identifier,attempt)
             if publisher:
                 try:await asyncio.to_thread(publisher.evidence,identifier,attempt,code)
