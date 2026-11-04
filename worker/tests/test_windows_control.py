@@ -48,7 +48,7 @@ def test_bootstrap_report_only_posts_status_without_leaking_worker_token(tmp_pat
     assert b'private-worker-token' not in requests[0].content
     assert b'omit-me' not in requests[0].content
     local = tmp_path / 'ShortPost' / 'windows-control-bootstrap' / 'latest.json'
-    assert 'private-worker-token' not in local.read_text()
+    assert 'private-worker-token' not in local.read_text(encoding='utf-8')
 
 
 @pytest.mark.skipif(os.name != 'nt', reason='Windows OpenSSH owner and ACL checks')

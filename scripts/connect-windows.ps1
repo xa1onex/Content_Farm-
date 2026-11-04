@@ -1,6 +1,8 @@
 [CmdletBinding()]
 param([string]$ConnectionFile = (Join-Path $PSScriptRoot 'connection.json'), [switch]$Disconnect, [switch]$Elevated)
 $ErrorActionPreference = 'Stop'
+# Prefer this PowerShell edition's built-in modules if launched from PowerShell 7.
+$env:PSModulePath = (Join-Path $PSHOME 'Modules') + [IO.Path]::PathSeparator + $env:PSModulePath
 $ControlRoot = Join-Path $env:ProgramData 'ShortPost\windows-control'
 $SshConfig = Join-Path $env:ProgramData 'ssh\sshd_config'
 $StateFile = Join-Path $ControlRoot 'state.json'
@@ -60,6 +62,7 @@ function Protect-Folder([string]$Folder) {
 }
 
 function Set-SshResourceAcl([string]$Path, [switch]$Directory) {
+    Import-Module (Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1') -ErrorAction Stop
     $Admins = New-Object Security.Principal.SecurityIdentifier('S-1-5-32-544')
     $System = New-Object Security.Principal.SecurityIdentifier('S-1-5-18')
     if ($Directory) {
