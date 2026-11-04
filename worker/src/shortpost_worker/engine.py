@@ -258,6 +258,7 @@ class Engine:
             for device in enabled:
                 for platform,path in device.profiles.items():
                     profile=Profile.load(path)
+                    if profile.navigation_only:raise WorkerError('profile_navigation_only')
                     if profile.platform!=platform or not profile.navigation_verified:
                         raise WorkerError('profile_not_validated')
         self.journal.control('stop','0')

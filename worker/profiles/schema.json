@@ -131,6 +131,11 @@
       "title": "Navigation Verified",
       "type": "boolean"
     },
+    "navigation_only": {
+      "default": false,
+      "title": "Navigation Only",
+      "type": "boolean"
+    },
     "account_steps": {
       "items": {
         "$ref": "#/$defs/Step"
@@ -161,7 +166,15 @@
       "$ref": "#/$defs/Locator"
     },
     "confirmation": {
-      "$ref": "#/$defs/Locator"
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Locator"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "confirmation_timeout_seconds": {
       "default": 30,
@@ -178,10 +191,26 @@
       "type": "array"
     },
     "caption_proof": {
-      "$ref": "#/$defs/Locator"
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Locator"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "author_proof": {
-      "$ref": "#/$defs/Locator"
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Locator"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "published_url": {
       "anyOf": [
@@ -297,9 +326,6 @@
     "upload_steps",
     "metadata_steps",
     "submit",
-    "confirmation",
-    "caption_proof",
-    "author_proof",
     "max_duration_seconds",
     "max_caption_chars"
   ],

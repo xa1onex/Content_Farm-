@@ -6,6 +6,19 @@ from shortpost_worker.api import Api
 from shortpost_worker.engine import Engine,Guard
 from shortpost_worker.errors import LeaseLost,UIError
 
+@pytest.mark.asyncio
+async def test_navigation_only_profile_blocks_live_before_any_server_call(config,journal,tmp_path):
+    from unittest.mock import Mock
+    from pathlib import Path
+    from shortpost_worker.errors import WorkerError
+    preset=Path(__file__).resolve().parents[1]/'profiles'/'instagram-452.0.0.0.43-ru-RU.navigation.json'
+    values=json.loads(preset.read_text(encoding='utf-8'));values['navigation_verified']=True
+    local=tmp_path/'instagram.local.json';local.write_text(json.dumps(values),encoding='utf-8')
+    config.devices[0].profiles={'instagram':local}
+    api=Mock();engine=Engine(config,journal,api)
+    with pytest.raises(WorkerError,match='profile_navigation_only'):await engine.run(live=True)
+    api.heartbeat.assert_not_called();api.claim.assert_not_called()
+
 class Backend:
     def __init__(self,config,assignment):
         self.config=config;self.assignment=assignment;self.status='assigned';self.results=[];self.events=[];self.cache={};self.lose_result_response=False

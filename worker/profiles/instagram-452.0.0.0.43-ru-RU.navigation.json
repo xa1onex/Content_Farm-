@@ -1,0 +1,151 @@
+{
+  "schema_version": 1,
+  "platform": "instagram",
+  "package": "com.instagram.android",
+  "app_version": "452.0.0.0.43",
+  "locale": "ru-RU",
+  "navigation_verified": false,
+  "navigation_only": true,
+  "account_steps": [
+    {
+      "action": "click",
+      "locator": {
+        "by": "id",
+        "value": "com.instagram.android:id/profile_tab",
+        "attribute": "text"
+      },
+      "source": null,
+      "timeout_seconds": 15,
+      "optional": false
+    }
+  ],
+  "account": {
+    "by": "id",
+    "value": "com.instagram.android:id/action_bar_title",
+    "attribute": "text"
+  },
+  "upload_steps": [
+    {
+      "action": "click",
+      "locator": {
+        "by": "id",
+        "value": "com.instagram.android:id/profile_header_create_button",
+        "attribute": "text"
+      },
+      "source": null,
+      "timeout_seconds": 15,
+      "optional": false
+    },
+    {
+      "action": "click",
+      "locator": {
+        "by": "accessibility id",
+        "value": "Создать новое видео Reels",
+        "attribute": "text"
+      },
+      "source": null,
+      "timeout_seconds": 15,
+      "optional": false
+    },
+    {
+      "action": "click",
+      "locator": {
+        "by": "xpath",
+        "value": "//*[@resource-id=\"com.instagram.android:id/auxiliary_button\" and @text=\"Начать новое видео\"]",
+        "attribute": "text"
+      },
+      "source": null,
+      "timeout_seconds": 2,
+      "optional": true
+    },
+    {
+      "action": "click",
+      "locator": {
+        "by": "xpath",
+        "value": "//*[@text=\"Недавние\"]/ancestor::*[@clickable=\"true\"][1]",
+        "attribute": "text"
+      },
+      "source": null,
+      "timeout_seconds": 15,
+      "optional": false
+    },
+    {
+      "action": "click",
+      "locator": {
+        "by": "accessibility id",
+        "value": "Все альбомы",
+        "attribute": "text"
+      },
+      "source": null,
+      "timeout_seconds": 15,
+      "optional": false
+    },
+    {
+      "action": "click",
+      "locator": {
+        "by": "xpath",
+        "value": "//*[@text=\"{media_album}\"]/ancestor::*[@clickable=\"true\"][1]",
+        "attribute": "text"
+      },
+      "source": null,
+      "timeout_seconds": 15,
+      "optional": false
+    },
+    {
+      "action": "click",
+      "locator": {
+        "by": "id",
+        "value": "com.instagram.android:id/gallery_grid_item_thumbnail",
+        "attribute": "text"
+      },
+      "source": null,
+      "timeout_seconds": 15,
+      "optional": false
+    },
+    {
+      "action": "click",
+      "locator": {
+        "by": "id",
+        "value": "com.instagram.android:id/clips_right_action_button",
+        "attribute": "text"
+      },
+      "source": null,
+      "timeout_seconds": 15,
+      "optional": false
+    }
+  ],
+  "metadata_steps": [
+    {
+      "action": "input",
+      "locator": {
+        "by": "id",
+        "value": "com.instagram.android:id/caption_input_text_view",
+        "attribute": "text"
+      },
+      "source": "caption",
+      "timeout_seconds": 15,
+      "optional": false
+    }
+  ],
+  "submit": {
+    "by": "id",
+    "value": "com.instagram.android:id/share_button",
+    "attribute": "text"
+  },
+  "confirmation": null,
+  "confirmation_timeout_seconds": 30,
+  "verification_steps": [],
+  "caption_proof": null,
+  "author_proof": null,
+  "published_url": null,
+  "url_source": "element",
+  "errors": {},
+  "parameter_steps": {},
+  "default_parameters": {},
+  "metrics_steps": [],
+  "metric_post_proof": null,
+  "metrics": {},
+  "max_duration_seconds": 60.0,
+  "max_caption_chars": 2000,
+  "max_title_chars": 100
+}

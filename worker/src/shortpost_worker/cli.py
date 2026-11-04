@@ -34,6 +34,7 @@ def parser():
     nav=sub.add_parser('test-navigation');nav.add_argument('--external-id',required=True)
     nav.add_argument('--platform',required=True,choices=['tiktok','instagram','youtube'])
     nav.add_argument('--username',required=True);nav.add_argument('--video',required=True,type=Path)
+    nav.add_argument('--profile',type=Path,help='Diagnostic profile override; does not change device configuration')
     return p
 
 async def connected(config,journal,command_name,live=False):
@@ -107,7 +108,7 @@ def main():
                     inspect(config,journal,args.external_id,getattr(args,'output',None));return
                 if args.command=='test-navigation':
                     from .calibration import test_navigation
-                    test_navigation(config,journal,args.external_id,args.platform,args.username,args.video);return
+                    test_navigation(config,journal,args.external_id,args.platform,args.username,args.video,profile_path=args.profile);return
                 if args.command=='run' and args.live and not config.allow_publish:
                     raise RuntimeError('Live mode requires explicit allow_publish=true in local config')
                 asyncio.run(connected(config,journal,args.command,live=getattr(args,'live',False)))

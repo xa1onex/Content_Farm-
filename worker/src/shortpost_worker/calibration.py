@@ -48,9 +48,9 @@ def inspect(config,journal,external_id,record=None):
             print('Private UI dump:',folder)
     finally:session.close()
 
-def test_navigation(config,journal,external_id,platform,username,video):
+def test_navigation(config,journal,external_id,platform,username,video,profile_path=None):
     devices=Devices(config,journal);device=devices.configured(external_id)
-    profile_path=device.profiles.get(platform)
+    profile_path=Path(profile_path).resolve() if profile_path else device.profiles.get(platform)
     if not profile_path:raise WorkerError('profile_not_configured')
     profile=Profile.load(profile_path).model_copy(update={'navigation_verified':True})
     adb=devices.connect(device,LocalGuard());session=Session(device,adb.serial)

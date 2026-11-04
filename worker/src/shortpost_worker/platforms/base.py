@@ -106,11 +106,13 @@ class PlatformPublisher(abc.ABC):
             if key not in choices:raise UIError('unsupported_publish_parameters')
             self.steps(choices[key])
     def submit(self,before_submit):
+        if self.profile.navigation_only:raise UIError('profile_navigation_only')
         element=self.find(self.profile.submit)
         self.guard.check();before_submit();self.guard.check()
         element.click()  # Exactly one click. HTTP retries disabled in the Appium transport.
     def expected_publication_text(self):return self.context["caption"]
     def verify_publication(self):
+        if self.profile.navigation_only:raise UIError('profile_navigation_only')
         self.find(self.profile.confirmation,self.profile.confirmation_timeout_seconds)
         self.steps(self.profile.verification_steps)
         if normalize_user(self.text(self.profile.author_proof))!=normalize_user(self.assignment.account.username):raise UIError('publication_author_unverified')

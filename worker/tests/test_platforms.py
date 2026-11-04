@@ -51,6 +51,22 @@ def test_optional_click_cannot_hide_submit_or_metadata_input():
     values=profile().model_dump();values['metadata_steps'][0]['optional']=True
     with pytest.raises(ValidationError):Profile.model_validate(values)
 
+def test_navigation_only_profile_needs_no_publication_proof():
+    values=profile('instagram').model_dump()
+    for field in ('confirmation','caption_proof','author_proof','published_url'):values.pop(field)
+    values['navigation_only']=True
+    assert Profile.model_validate(values).confirmation is None
+    values['navigation_only']=False
+    with pytest.raises(ValidationError):Profile.model_validate(values)
+
+def test_navigation_only_profile_cannot_submit_even_when_navigation_verified(tmp_path):
+    values=profile('instagram').model_dump();values['navigation_only']=True
+    driver=Mock();publisher=InstagramPublisher(Profile.model_validate(values),driver,Mock(),Mock(),tmp_path)
+    before_submit=Mock()
+    with pytest.raises(UIError,match='profile_navigation_only'):publisher.submit(before_submit)
+    with pytest.raises(UIError,match='profile_navigation_only'):publisher.verify_publication()
+    before_submit.assert_not_called();driver.find_elements.assert_not_called()
+
 @pytest.mark.parametrize('failure,skipped',[
     ('ui_selector_missing',True),('ambiguous_ui_selector',False),('login_required',False)])
 def test_optional_dialog_only_skips_absence(tmp_path,failure,skipped):
