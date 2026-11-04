@@ -7,7 +7,8 @@ import subprocess
 import pytest
 
 
-def test_bootstrap_report_only_posts_status_without_leaking_worker_token(tmp_path, monkeypatch):
+@pytest.mark.parametrize('payload_mode', [False, True])
+def test_bootstrap_report_only_posts_status_without_leaking_worker_token(tmp_path, monkeypatch, payload_mode):
     import importlib.util
     import uuid
     from types import SimpleNamespace
@@ -30,15 +31,89 @@ def test_bootstrap_report_only_posts_status_without_leaking_worker_token(tmp_pat
 
     client = httpx.Client(transport=httpx.MockTransport(handle))
     monkeypatch.setattr(module.httpx, 'Client', lambda **kwargs: client)
-    monkeypatch.setattr(module.sys, 'argv', ['report', '--stage', 'installer_failed', '--message', 'Known setup error'])
+    message = 'Не удалось запустить службу "OpenSSH SSH Server (sshd)".\nСледующая строка.'
+    argv = ['report', '--stage', 'installer_failed', '--message', message]
+    if payload_mode:
+        import base64
+        data = {'stage': 'installer_failed', 'message': message,
+                'diagnostics': {'events': [{'id': 4, 'message': 'Permissions error', 'token': 'omit-me'}], 'unknown': 'omit-me'}}
+        argv = ['report', '--payload-base64', base64.b64encode(json.dumps(data).encode()).decode()]
+    monkeypatch.setattr(module.sys, 'argv', argv)
     assert module.main() == 0
     assert len(requests) == 1 and requests[0].url.path == '/api/v1/workers/heartbeat'
     body = json.loads(requests[0].content)
     assert body['devices'] == []
     assert body['capabilities']['windows_control_bootstrap']['stage'] == 'installer_failed'
+    assert body['capabilities']['windows_control_bootstrap']['message'] == message
     assert b'private-worker-token' not in requests[0].content
+    assert b'omit-me' not in requests[0].content
     local = tmp_path / 'ShortPost' / 'windows-control-bootstrap' / 'latest.json'
     assert 'private-worker-token' not in local.read_text()
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows OpenSSH owner and ACL checks')
+def test_ssh_resources_are_owned_by_administrators_and_only_system_and_admins_have_access(tmp_path):
+    script = Path(__file__).resolve().parents[2] / 'scripts' / 'connect-windows.ps1'
+    folder = tmp_path / 'SSH folder with spaces'
+    folder.mkdir()
+    key = folder / 'host_key'
+    key.write_text('Synthetic key material; this test checks ownership and permissions only.')
+    code = '''
+$ErrorActionPreference='Stop'
+$t=$null; $e=$null
+$ast=[System.Management.Automation.Language.Parser]::ParseFile($env:SHORTPOST_CONTROL_SCRIPT,[ref]$t,[ref]$e)
+$fn=$ast.Find({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Set-SshResourceAcl'},$true)
+. ([scriptblock]::Create($fn.Extent.Text))
+Set-SshResourceAcl $env:SHORTPOST_ACL_FOLDER -Directory
+Set-SshResourceAcl $env:SHORTPOST_ACL_KEY
+foreach ($path in @($env:SHORTPOST_ACL_FOLDER,$env:SHORTPOST_ACL_KEY)) {
+ $acl=Get-Acl -LiteralPath $path
+ if ($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne 'S-1-5-32-544') { throw 'Incorrect owner' }
+ if (-not $acl.AreAccessRulesProtected) { throw 'Unexpected inheritance' }
+ $rules=@($acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]))
+ if ($rules.Count -ne 2) { throw 'Unexpected ACL entries' }
+ foreach ($rule in $rules) {
+  if ($rule.IdentityReference.Value -notin @('S-1-5-18','S-1-5-32-544')) { throw 'Unexpected principal' }
+  if ($rule.FileSystemRights -ne [Security.AccessControl.FileSystemRights]::FullControl) { throw 'Missing service access' }
+ }
+}
+'''
+    result = subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', code],
+        capture_output=True, text=True, timeout=20,
+        env=dict(os.environ, SHORTPOST_CONTROL_SCRIPT=str(script), SHORTPOST_ACL_FOLDER=str(folder), SHORTPOST_ACL_KEY=str(key)))
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows PowerShell to Python status transport')
+def test_status_transport_preserves_cyrillic_quotes_and_line_breaks(tmp_path):
+    import sys
+    script = Path(__file__).resolve().parents[2] / 'scripts' / 'connect-windows.ps1'
+    output = tmp_path / 'payload.json'
+    reporter = tmp_path / 'reporter.py'
+    reporter.write_text('import base64,json,os,sys\nfrom pathlib import Path\n'
+        'assert sys.argv[1]=="--payload-base64" and len(sys.argv)==3\n'
+        'Path(os.environ["SHORTPOST_TEST_PAYLOAD"]).write_bytes(base64.b64decode(sys.argv[2]))\n')
+    message = 'Не удалось запустить службу "OpenSSH SSH Server (sshd)".\nСтрока 2.'
+    code = '''
+$ErrorActionPreference='Stop'
+$t=$null; $e=$null
+$ast=[System.Management.Automation.Language.Parser]::ParseFile($env:SHORTPOST_CONTROL_SCRIPT,[ref]$t,[ref]$e)
+$fn=$ast.Find({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Send-BootstrapStatus'},$true)
+. ([scriptblock]::Create($fn.Extent.Text))
+function Join-Path($Path,$ChildPath) {
+ if ($ChildPath -like '*python.exe') { return $env:SHORTPOST_TEST_PYTHON }
+ return $env:SHORTPOST_TEST_REPORTER
+}
+Send-BootstrapStatus 'installer_failed' $env:SHORTPOST_TEST_MESSAGE @{service_status='Stopped'}
+exit $LASTEXITCODE
+'''
+    result = subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', code],
+        capture_output=True, text=True, timeout=20,
+        env=dict(os.environ, SHORTPOST_CONTROL_SCRIPT=str(script), SHORTPOST_TEST_PYTHON=sys.executable,
+                 SHORTPOST_TEST_REPORTER=str(reporter), SHORTPOST_TEST_PAYLOAD=str(output), SHORTPOST_TEST_MESSAGE=message))
+    assert result.returncode == 0, result.stdout + result.stderr
+    data = json.loads(output.read_text(encoding='utf-8'))
+    assert data == {'stage': 'installer_failed', 'message': message, 'diagnostics': {'service_status': 'Stopped'}}
 
 
 @pytest.mark.skipif(os.name != 'nt', reason='Real Windows CMD launcher')

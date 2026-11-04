@@ -16,7 +16,7 @@ def build(package_url, sha256):
     payload = f"""
 $ErrorActionPreference='Stop'
 try {{
- $folder=Join-Path $env:LOCALAPPDATA 'ShortPost\\windows-control-installer-v2'
+ $folder=Join-Path $env:LOCALAPPDATA 'ShortPost\\windows-control-installer-v3'
  New-Item -ItemType Directory -Path $folder -Force | Out-Null
  $package=Join-Path $folder 'package.zip'
  [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12

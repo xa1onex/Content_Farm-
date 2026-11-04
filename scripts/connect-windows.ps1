@@ -15,13 +15,13 @@ try {
     $TranscriptStarted = $true
 } catch { }
 
-function Send-BootstrapStatus([string]$Stage, [string]$Message = '') {
+function Send-BootstrapStatus([string]$Stage, [string]$Message = '', [hashtable]$Diagnostics = @{}) {
     $Python = Join-Path $env:WINDIR 'System32\Content_Farm-\.venv-worker\Scripts\python.exe'
     $Reporter = Join-Path $PSScriptRoot 'report-windows-control.py'
     if ((Test-Path -LiteralPath $Python) -and (Test-Path -LiteralPath $Reporter)) {
-        $ReportArguments = @($Reporter, '--stage', $Stage)
-        if ($Message) { $ReportArguments += @('--message', $Message) }
-        & $Python @ReportArguments
+        $Payload = @{ stage = $Stage; message = $Message; diagnostics = $Diagnostics } | ConvertTo-Json -Depth 6 -Compress
+        $Encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Payload))
+        & $Python $Reporter --payload-base64 $Encoded
     }
 }
 
@@ -56,7 +56,45 @@ function Invoke-Checked([string]$Executable, [string[]]$Arguments) {
 }
 
 function Protect-Folder([string]$Folder) {
-    Invoke-Checked 'icacls.exe' @($Folder, '/inheritance:r', '/grant:r', '*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F')
+    Set-SshResourceAcl $Folder -Directory
+}
+
+function Set-SshResourceAcl([string]$Path, [switch]$Directory) {
+    $Admins = New-Object Security.Principal.SecurityIdentifier('S-1-5-32-544')
+    $System = New-Object Security.Principal.SecurityIdentifier('S-1-5-18')
+    if ($Directory) {
+        $Acl = New-Object Security.AccessControl.DirectorySecurity
+        $Inheritance = [Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit'
+    } else {
+        $Acl = New-Object Security.AccessControl.FileSecurity
+        $Inheritance = [Security.AccessControl.InheritanceFlags]::None
+    }
+    $Acl.SetAccessRuleProtection($true, $false)
+    $Acl.SetOwner($Admins)
+    foreach ($Sid in @($Admins, $System)) {
+        $Rule = New-Object Security.AccessControl.FileSystemAccessRule($Sid, [Security.AccessControl.FileSystemRights]::FullControl, $Inheritance, [Security.AccessControl.PropagationFlags]::None, [Security.AccessControl.AccessControlType]::Allow)
+        $Acl.AddAccessRule($Rule)
+    }
+    Set-Acl -LiteralPath $Path -AclObject $Acl
+}
+
+function Get-SshServiceDiagnostics {
+    $Details = @{}
+    $Service = Get-Service sshd -ErrorAction SilentlyContinue
+    if ($Service) { $Details.service_status = [string]$Service.Status }
+    try { $Details.service_path = [string](Get-CimInstance Win32_Service -Filter "Name='sshd'" -ErrorAction Stop).PathName } catch { }
+    $Details.events = @()
+    foreach ($Log in @('OpenSSH/Operational', 'OpenSSH/Admin')) {
+        $Details.events += @(Get-WinEvent -FilterHashtable @{ LogName = $Log; StartTime = (Get-Date).AddMinutes(-3) } -MaxEvents 3 -ErrorAction SilentlyContinue | ForEach-Object { @{ id = $_.Id; message = ([string]$_.Message).Substring(0, [Math]::Min(700, ([string]$_.Message).Length)) } })
+    }
+    $Details.resource_acls = @()
+    foreach ($Resource in @($ControlRoot, (Join-Path $ControlRoot 'ssh_host_ed25519_key'), (Split-Path -Parent $SshConfig), (Join-Path (Split-Path -Parent $SshConfig) 'logs'), $SshConfig)) {
+        if (Test-Path -LiteralPath $Resource) {
+            $Acl = Get-Acl -LiteralPath $Resource
+            $Details.resource_acls += @{ resource = $Resource; owner = [string]$Acl.Owner; sddl = [string]$Acl.Sddl }
+        }
+    }
+    return $Details
 }
 
 function Read-OwnedState {
@@ -82,10 +120,18 @@ function Restore-Original($Saved) {
     if (-not $Saved.firewall_existed) {
         Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction SilentlyContinue | Disable-NetFirewallRule
     }
+    foreach ($Backup in @(@{ path = (Split-Path -Parent $SshConfig); sddl = $Saved.ssh_directory_sddl }, @{ path = (Join-Path (Split-Path -Parent $SshConfig) 'logs'); sddl = $Saved.logs_directory_sddl })) {
+        if ($Backup.sddl -and (Test-Path -LiteralPath $Backup.path)) {
+            $Acl = New-Object Security.AccessControl.DirectorySecurity
+            $Acl.SetSecurityDescriptorSddlForm($Backup.sddl)
+            Set-Acl -LiteralPath $Backup.path -AclObject $Acl
+        }
+    }
     Remove-Item -LiteralPath $StateFile -ErrorAction SilentlyContinue
 }
 
 try {
+    $StartupDiagnostics = @{}
     Send-BootstrapStatus 'installer_started'
     $Saved = Read-OwnedState
     if ($Disconnect) {
@@ -141,6 +187,8 @@ try {
             start_type = $(if ($ExistingService) { [string]$ExistingService.StartType } else { 'Disabled' })
             was_running = [bool]($ExistingService -and $ExistingService.Status -eq 'Running')
             firewall_existed = [bool](Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction SilentlyContinue)
+            ssh_directory_sddl = $(if (Test-Path -LiteralPath (Split-Path -Parent $SshConfig)) { (Get-Acl -LiteralPath (Split-Path -Parent $SshConfig)).Sddl } else { $null })
+            logs_directory_sddl = $(if (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $SshConfig) 'logs')) { (Get-Acl -LiteralPath (Join-Path (Split-Path -Parent $SshConfig) 'logs')).Sddl } else { $null })
         }
         if ($ExistingConfig) { Copy-Item -LiteralPath $SshConfig -Destination (Join-Path $ControlRoot 'sshd_config.before') }
         [IO.File]::WriteAllText($StateFile, ($Saved | ConvertTo-Json), $Utf8)
@@ -163,6 +211,8 @@ try {
             }
             $AuthorizedKeys = Join-Path $ControlRoot 'authorized_keys'
             [IO.File]::WriteAllText($AuthorizedKeys, ($Connection.operator_public_key + "`n"), $Utf8)
+            Set-SshResourceAcl $HostKey
+            Set-SshResourceAcl $AuthorizedKeys
             $ConfigText = @"
 $Marker
 Port $($Connection.windows_port)
@@ -182,11 +232,16 @@ X11Forwarding no
 LogLevel INFO
 "@
             New-Item -ItemType Directory -Path (Split-Path -Parent $SshConfig) -Force | Out-Null
+            New-Item -ItemType Directory -Path (Join-Path (Split-Path -Parent $SshConfig) 'logs') -Force | Out-Null
+            Protect-Folder (Split-Path -Parent $SshConfig)
+            Protect-Folder (Join-Path (Split-Path -Parent $SshConfig) 'logs')
             [IO.File]::WriteAllText($SshConfig, ($ConfigText + "`n"), $Utf8)
+            Set-SshResourceAcl $SshConfig
             Invoke-Checked $Sshd @('-t', '-f', $SshConfig)
             Set-Service sshd -StartupType Manual
             Start-Service sshd
         } catch {
+            try { $StartupDiagnostics = Get-SshServiceDiagnostics } catch { }
             if (Get-Service sshd -ErrorAction SilentlyContinue) { Restore-Original $Saved }
             else { Remove-Item -LiteralPath $StateFile -ErrorAction SilentlyContinue }
             throw
@@ -225,7 +280,7 @@ LogLevel INFO
     }
 } catch {
     Write-Host ('Connection failed: ' + $_.Exception.Message) -ForegroundColor Red
-    Send-BootstrapStatus 'installer_failed' $_.Exception.Message
+    Send-BootstrapStatus 'installer_failed' $_.Exception.Message $StartupDiagnostics
     Write-Host ('Log: ' + $TranscriptPath)
     Read-Host 'Leave this window open. Press Enter only to close it'
     exit 1
