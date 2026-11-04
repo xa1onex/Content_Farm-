@@ -1,15 +1,53 @@
 [CmdletBinding()]
-param([string]$ConnectionFile = (Join-Path $PSScriptRoot 'connection.json'), [switch]$Disconnect)
+param([string]$ConnectionFile = (Join-Path $PSScriptRoot 'connection.json'), [switch]$Disconnect, [switch]$Elevated)
 $ErrorActionPreference = 'Stop'
 $ControlRoot = Join-Path $env:ProgramData 'ShortPost\windows-control'
 $SshConfig = Join-Path $env:ProgramData 'ssh\sshd_config'
 $StateFile = Join-Path $ControlRoot 'state.json'
 $Marker = '# SHORTPOST WINDOWS CONTROL V1'
 $Utf8 = New-Object System.Text.UTF8Encoding($false)
+$BootstrapFolder = Join-Path $env:LOCALAPPDATA 'ShortPost\windows-control-bootstrap'
+New-Item -ItemType Directory -Path $BootstrapFolder -Force | Out-Null
+$TranscriptPath = Join-Path $BootstrapFolder ("connect-$PID.log")
+$TranscriptStarted = $false
+try {
+    Start-Transcript -Path $TranscriptPath -Append | Out-Null
+    $TranscriptStarted = $true
+} catch { }
+
+function Send-BootstrapStatus([string]$Stage, [string]$Message = '') {
+    $Python = Join-Path $env:WINDIR 'System32\Content_Farm-\.venv-worker\Scripts\python.exe'
+    $Reporter = Join-Path $PSScriptRoot 'report-windows-control.py'
+    if ((Test-Path -LiteralPath $Python) -and (Test-Path -LiteralPath $Reporter)) {
+        $ReportArguments = @($Reporter, '--stage', $Stage)
+        if ($Message) { $ReportArguments += @('--message', $Message) }
+        & $Python @ReportArguments
+    }
+}
+
 $Identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $Principal = New-Object Security.Principal.WindowsPrincipal($Identity)
 if (-not $Principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    throw 'Start CONNECT-WINDOWS.cmd and approve the Windows administrator prompt.'
+    if ($Elevated) { throw 'Windows did not grant administrator rights.' }
+    Send-BootstrapStatus 'awaiting_windows_confirmation'
+    Write-Host 'Confirm the Windows administrator request to connect this PC.'
+    try {
+        $Quote = [char]34
+        $Launch = '-NoProfile -ExecutionPolicy Bypass -File ' + $Quote + $PSCommandPath + $Quote + ' -ConnectionFile ' + $Quote + $ConnectionFile + $Quote + ' -Elevated'
+        if ($Disconnect) { $Launch += ' -Disconnect' }
+        $Child = Start-Process -FilePath powershell.exe -Verb RunAs -ArgumentList $Launch -PassThru -Wait
+        if ($Child.ExitCode -ne 0) {
+            Write-Host 'Connection did not finish. Details were saved and sent to the operator where possible.' -ForegroundColor Red
+            Write-Host ('Log: ' + $TranscriptPath)
+            Read-Host 'Leave this window open. Press Enter only to close it'
+        }
+        exit $Child.ExitCode
+    } catch {
+        Send-BootstrapStatus 'windows_confirmation_failed' 'Windows did not launch the elevated installer.'
+        Write-Host 'Windows did not launch the administrator window. Status was sent to the operator where possible.' -ForegroundColor Red
+        Read-Host 'Leave this window open. Press Enter only to close it'
+        exit 1
+    }
 }
 
 function Invoke-Checked([string]$Executable, [string[]]$Arguments) {
@@ -48,6 +86,7 @@ function Restore-Original($Saved) {
 }
 
 try {
+    Send-BootstrapStatus 'installer_started'
     $Saved = Read-OwnedState
     if ($Disconnect) {
         if (-not $Saved) { throw 'No ShortPost Windows control installation found.' }
@@ -108,6 +147,7 @@ try {
         try {
             $Capability = Get-WindowsCapability -Online -Name 'OpenSSH.Server~~~~0.0.1.0'
             if ($Capability.State -ne 'Installed') {
+                Send-BootstrapStatus 'installing_windows_component'
                 Write-Host 'Installing the Microsoft Windows OpenSSH Server component. This may take several minutes.'
                 $Installation = Add-WindowsCapability -Online -Name 'OpenSSH.Server~~~~0.0.1.0'
                 if ($Installation.RestartNeeded) { throw 'Windows requires a restart to finish OpenSSH installation.' }
@@ -175,13 +215,20 @@ LogLevel INFO
     $Destination = $Connection.server_user + '@' + $Connection.server_host
     Write-Host 'Connecting Windows control. Keep this window open. Ctrl+C disconnects the tunnel.'
     Write-Host 'Only the pinned operator key can log in; Windows SSH listens on localhost only.'
+    Send-BootstrapStatus 'connecting_tunnel'
     while ($true) {
         & $Ssh -F NUL -N -T -i $TunnelKey -p $Connection.server_port -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$KnownHosts" -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -R $Forward $Destination
-        Write-Host "Tunnel exited ($LASTEXITCODE). Reconnecting in 10 seconds; Ctrl+C to stop."
+        $TunnelExitCode = $LASTEXITCODE
+        Send-BootstrapStatus 'tunnel_exited' ("SSH exit code: $TunnelExitCode")
+        Write-Host "Tunnel exited ($TunnelExitCode). Reconnecting in 10 seconds; Ctrl+C to stop."
         Start-Sleep -Seconds 10
     }
 } catch {
     Write-Host ('Connection failed: ' + $_.Exception.Message) -ForegroundColor Red
-    Read-Host 'Press Enter to close'
+    Send-BootstrapStatus 'installer_failed' $_.Exception.Message
+    Write-Host ('Log: ' + $TranscriptPath)
+    Read-Host 'Leave this window open. Press Enter only to close it'
     exit 1
+} finally {
+    if ($TranscriptStarted) { Stop-Transcript -ErrorAction SilentlyContinue | Out-Null }
 }

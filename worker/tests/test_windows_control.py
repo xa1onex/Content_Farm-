@@ -7,6 +7,75 @@ import subprocess
 import pytest
 
 
+def test_bootstrap_report_only_posts_status_without_leaking_worker_token(tmp_path, monkeypatch):
+    import importlib.util
+    import uuid
+    from types import SimpleNamespace
+    import httpx
+    script = Path(__file__).resolve().parents[2] / 'scripts' / 'report-windows-control.py'
+    spec = importlib.util.spec_from_file_location('bootstrap_reporter', script)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setenv('LOCALAPPDATA', str(tmp_path))
+    monkeypatch.setenv('WINDIR', str(tmp_path / 'Windows'))
+    config = SimpleNamespace(state_dir=tmp_path, api_url='https://example.invalid/api/v1', worker_id=uuid.uuid4())
+    monkeypatch.setattr(module, 'load', lambda *a: config)
+    monkeypatch.setattr(module, 'DPAPI', lambda: object())
+    monkeypatch.setattr(module, 'TokenStore', lambda *a: SimpleNamespace(read=lambda: 'private-worker-token'))
+    requests = []
+
+    def handle(request):
+        requests.append(request)
+        return httpx.Response(200, json={'worker_id': str(config.worker_id)})
+
+    client = httpx.Client(transport=httpx.MockTransport(handle))
+    monkeypatch.setattr(module.httpx, 'Client', lambda **kwargs: client)
+    monkeypatch.setattr(module.sys, 'argv', ['report', '--stage', 'installer_failed', '--message', 'Known setup error'])
+    assert module.main() == 0
+    assert len(requests) == 1 and requests[0].url.path == '/api/v1/workers/heartbeat'
+    body = json.loads(requests[0].content)
+    assert body['devices'] == []
+    assert body['capabilities']['windows_control_bootstrap']['stage'] == 'installer_failed'
+    assert b'private-worker-token' not in requests[0].content
+    local = tmp_path / 'ShortPost' / 'windows-control-bootstrap' / 'latest.json'
+    assert 'private-worker-token' not in local.read_text()
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Real Windows CMD launcher')
+def test_cmd_launcher_executes_companion_script_from_a_directory_with_spaces(tmp_path):
+    import shutil
+    folder = tmp_path / 'Connection folder with spaces'
+    folder.mkdir()
+    script = Path(__file__).resolve().parents[2] / 'scripts' / 'connect-windows.cmd'
+    target = folder / script.name
+    shutil.copyfile(script, target)
+    (folder / 'connect-windows.ps1').write_text("Write-Output 'SHORTPOST_LAUNCH_OK'; exit 0\n")
+    result = subprocess.run([os.environ['COMSPEC'], '/d', '/c', str(target)],
+                            capture_output=True, text=True, timeout=20)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'SHORTPOST_LAUNCH_OK' in result.stdout
+
+
+def test_single_file_connector_requires_pinned_https_and_checks_package_before_execution():
+    import base64
+    import importlib.util
+    import re
+    script = Path(__file__).resolve().parents[2] / 'scripts' / 'build-windows-connector.py'
+    spec = importlib.util.spec_from_file_location('connector_builder', script)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    url = 'https://github.com/example/repo/raw/' + 'a' * 40 + '/downloads/package.zip'
+    output = module.build(url, 'b' * 64)
+    encoded = re.search(r'-EncodedCommand ([A-Za-z0-9+/=]+)', output)[1]
+    decoded = base64.b64decode(encoded).decode('utf-16le')
+    assert url in decoded and 'b' * 64 in decoded
+    assert decoded.index('Get-FileHash') < decoded.index('Expand-Archive') < decoded.index("& (Join-Path")
+    for bad in (url.replace('/raw/' + 'a' * 40, '/raw/main'), url.replace('https:', 'http:'),
+                url.replace('github.com', 'untrusted.example')):
+        with pytest.raises(ValueError):
+            module.build(bad, 'b' * 64)
+
+
 @pytest.mark.skipif(os.name != 'nt', reason='Windows PowerShell native quoting')
 def test_installer_generates_an_unencrypted_host_key_with_windows_powershell(tmp_path):
     script = Path(__file__).resolve().parents[2] / 'scripts' / 'connect-windows.ps1'
