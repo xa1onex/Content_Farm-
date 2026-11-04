@@ -1,0 +1,25 @@
+#!/sbin/openrc-run
+name="ShortPost proxy gateway"
+command="/usr/bin/sing-box"
+command_args="run -c /etc/shortpost/config.json"
+command_background="yes"
+pidfile="/run/shortpost-gateway.pid"
+output_log="/var/log/shortpost-gateway.log"
+error_log="/var/log/shortpost-gateway.log"
+depend() { need shortpost-lan; }
+start_pre() {
+    umask 077
+    touch /var/log/shortpost-gateway.log
+    chmod 0600 /var/log/shortpost-gateway.log
+    modprobe tun || return 1
+    /usr/bin/sing-box check -c /etc/shortpost/config.json >/dev/null 2>&1 || return 1
+}
+start_post() {
+    n=0
+    until ip link show sp-tun >/dev/null 2>&1; do
+        n=$((n+1)); [ "$n" -lt 30 ] || return 1; sleep 0.1
+    done
+    ip link set sp-tun up || return 1
+    ip route replace default dev sp-tun metric 10 table 100
+}
+# Stopping sing-box removes its TUN route. The prohibit route and nft guard remain.

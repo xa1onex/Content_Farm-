@@ -7,6 +7,7 @@
 | `server/` | Существующий ShortPost: FastAPI, PostgreSQL, очередь, расписание, аналитика и Telegram-модуль | Linux / Docker |
 | `worker/` | Новый локальный исполнитель: API, SQLite journal, DPAPI, MuMu/ADB/Appium, платформенные адаптеры | Windows 10/11, интерактивный пользователь |
 | `content_farm/` | Ферма нарезки: создание роликов, постоянные ID, Google Диск и регистрация в ShortPost | Linux; на Windows — WSL2 / Docker Desktop |
+| `network/gateway/` | Отдельный SOCKS5 для каждого MuMu через внешний шлюз | Windows / отдельный Linux-шлюз |
 
 Сервер доступен по `https://origin.xdoublegroup.online:8443/api/v1`. Для Windows Worker **не нужно разворачивать сервер и PostgreSQL на ПК**. Спецификация: [WORKER_API_SPEC.md](docs/WORKER_API_SPEC.md), схема: [openapi.json](docs/openapi.json).
 
@@ -18,6 +19,11 @@ ID сохраняется при повторе; одинаковые по со�
 
 В публичной публикации остаётся только описание ролика. Служебный ID хранится
 в имени файла и внутри системы; в кадр, подпись и заголовок он не добавляется.
+
+Для отдельного прокси каждого эмулятора используется [сетевой шлюз](network/gateway/README.md).
+Он обслуживает весь Android, закрепляет адреса устройств и блокирует прямой
+выход при сбое прокси. Проверен первый экземпляр MuMu; модуль не включает
+автоматический live-режим публикаций.
 
 ## Быстрый старт Windows
 

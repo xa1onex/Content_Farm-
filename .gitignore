@@ -34,3 +34,7 @@
 .coverage
 
 **/test-results.xml
+**/proxy-vault/
+**/*.private.*
+**/*.qcow2
+**/seed*.iso
