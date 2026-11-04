@@ -70,6 +70,13 @@ def test_single_file_connector_requires_pinned_https_and_checks_package_before_e
     decoded = base64.b64decode(encoded).decode('utf-16le')
     assert url in decoded and 'b' * 64 in decoded
     assert decoded.index('Get-FileHash') < decoded.index('Expand-Archive') < decoded.index("& (Join-Path")
+    if os.name == 'nt':
+        code = ('$tokens=$null; $errors=$null; '
+                '[System.Management.Automation.Language.Parser]::ParseInput($env:SHORTPOST_BOOTSTRAP_PAYLOAD, '
+                '[ref]$tokens, [ref]$errors) | Out-Null; if ($errors.Count) { exit 1 }')
+        result = subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', code],
+            env=dict(os.environ, SHORTPOST_BOOTSTRAP_PAYLOAD=decoded), capture_output=True, timeout=20)
+        assert result.returncode == 0
     for bad in (url.replace('/raw/' + 'a' * 40, '/raw/main'), url.replace('https:', 'http:'),
                 url.replace('github.com', 'untrusted.example')):
         with pytest.raises(ValueError):
