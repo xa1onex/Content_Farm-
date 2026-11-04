@@ -105,3 +105,20 @@ async def test_idle_server_response_can_omit_job(config,journal):
     api=Api(config,'token',journal,httpx.MockTransport(lambda _:httpx.Response(200,json={})))
     try:assert not (await api.claim()).get('job')
     finally:await api.close()
+
+@pytest.mark.asyncio
+async def test_requested_claim_preserves_filter_during_network_replay(config,journal):
+    import uuid
+    seen=[];target=str(uuid.uuid4())
+    def handler(request):
+        seen.append((request.headers['Idempotency-Key'],request.content))
+        if len(seen)==1:raise httpx.ReadError('response lost')
+        return httpx.Response(200,json={})
+    api=Api(config,'token',journal,httpx.MockTransport(handler))
+    try:
+        with pytest.raises(WorkerError):await api.claim(target)
+        with pytest.raises(WorkerError,match='pending_claim_requires_recovery'):await api.claim(str(uuid.uuid4()))
+        assert len(seen)==1
+        assert await api.claim(target)=={} and seen[0]==seen[1]
+        assert json.loads(seen[0][1])=={'job_id':target}
+    finally:await api.close()

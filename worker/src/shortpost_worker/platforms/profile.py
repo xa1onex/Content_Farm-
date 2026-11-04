@@ -28,6 +28,7 @@ class Profile(Strict):
     locale:str=Field(min_length=2)
     navigation_verified:bool=False
     navigation_only:bool=False
+    instagram_reels_452:bool=False
     account_steps:list[Step]=Field(default_factory=list)
     account:Locator
     upload_steps:list[Step]=Field(min_length=1)
@@ -56,7 +57,10 @@ class Profile(Strict):
         for step in steps:
             if step.action=='click' and step.locator and step.locator.by==self.submit.by and step.locator.value==self.submit.value:
                 raise ValueError('Submit must not occur in a replayable flow')
-        if not self.navigation_only:
+        if self.instagram_reels_452:
+            if (self.platform,self.package,self.app_version,self.locale.replace('_','-').lower())!=('instagram','com.instagram.android','452.0.0.0.43','ru-ru'):
+                raise ValueError('Instagram Reels adapter requires the calibrated version and locale')
+        if not self.navigation_only and not self.instagram_reels_452:
             if not all((self.confirmation,self.caption_proof,self.author_proof)):raise ValueError('Publication proof locators required')
             if self.url_source=='element' and not self.published_url:raise ValueError('URL locator required')
         if self.metrics and not self.metric_post_proof and self.url_source!='clipboard':raise ValueError('Metrics require proof of the opened post ID')

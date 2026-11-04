@@ -122,6 +122,8 @@ class DeviceIn(Input):
 class Heartbeat(Input):
     capabilities: dict=Field(default_factory=dict)
     devices: list[DeviceIn]=Field(default_factory=list,max_length=100)
+class ClaimInput(Input):
+    job_id: UUID|None=None
 class LeaseEvent(Input):
     event_id: str=Field(min_length=8,max_length=100)
     lease_token: str=Field(min_length=20,max_length=200)

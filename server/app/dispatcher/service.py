@@ -14,7 +14,7 @@ ACTIVE=('assigned','processing','unknown')
 def worker_ready(worker):
     return worker.enabled and worker.heartbeat_at and worker.heartbeat_at>now()-timedelta(seconds=settings().heartbeat_timeout)
 
-def claim(s,worker_id):
+def claim(s,worker_id,job_id=None):
     w=require(s,Worker,worker_id,locked=True)
     if not worker_ready(w):raise HTTPException(409,'Worker must be enabled and send a heartbeat')
     busy_count=s.scalar(select(func.count()).select_from(Job).where(Job.worker_id==w.id,Job.status.in_(ACTIVE)))
@@ -27,6 +27,7 @@ def claim(s,worker_id):
             Device.worker_id==w.id,Device.enabled.is_(True),
             Device.id.not_in(busy_devices),Clip.status=='ready',Clip.verified_at.is_not(None))
         .order_by(Job.scheduled_at,Job.id).with_for_update(of=Job,skip_locked=True))
+    if job_id is not None:q=q.where(Job.id==job_id)
     candidates=list(s.scalars(q.limit(100)))
     job=None
     for candidate in candidates:

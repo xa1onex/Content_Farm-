@@ -136,6 +136,11 @@
       "title": "Navigation Only",
       "type": "boolean"
     },
+    "instagram_reels_452": {
+      "default": false,
+      "title": "Instagram Reels 452",
+      "type": "boolean"
+    },
     "account_steps": {
       "items": {
         "$ref": "#/$defs/Step"

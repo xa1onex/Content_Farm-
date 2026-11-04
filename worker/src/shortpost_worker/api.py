@@ -69,10 +69,13 @@ class Api:
         except WorkerError as exc:
             if exc.status in (400,404,409,413,422):self.journal.reject(operation)
             raise
-    async def claim(self):
+    async def claim(self,job_id=None):
         pending=self.journal.pending('claim')
-        if pending:return await self.send_operation(pending[0])
-        return await self.mutate('claim','/jobs/claim',{})
+        if pending:
+            if job_id is not None and self.journal.open(pending[0]['body']).get('job_id')!=str(job_id):
+                raise WorkerError('pending_claim_requires_recovery')
+            return await self.send_operation(pending[0])
+        return await self.mutate('claim','/jobs/claim',{'job_id':str(job_id)} if job_id is not None else {})
     async def heartbeat(self,devices,*,capabilities=None):
         pending=self.journal.pending('heartbeat')
         if pending:

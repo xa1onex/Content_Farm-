@@ -171,7 +171,8 @@ def add_job(data:JobIn,request:Request,s=DB,actor=ADMIN):
     return record(scheduler.create_job(s,account,require(s,Clip,data.clip_id),data.scheduled_at,data.parameters))
 @router.post('/jobs/claim',response_model=AssignmentOut,response_model_exclude_none=True)
 @idempotent
-def claim_job(request:Request,s=DB,actor=WORKER):return queue.claim(s,actor.worker_id)
+def claim_job(request:Request,data:ClaimInput|None=None,s=DB,actor=WORKER):
+    return queue.claim(s,actor.worker_id,data.job_id if data else None)
 @router.get('/jobs/{job_id}')
 def get_job(job_id:UUID,s=DB,actor=READER):
     item=require(s,Job,job_id)

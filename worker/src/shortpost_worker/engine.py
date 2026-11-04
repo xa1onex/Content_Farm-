@@ -251,6 +251,37 @@ class Engine:
             stop_requested=lambda:self.api.auth_failed.is_set() or self.journal.control('stop')=='1')
         if not all(d['ready'] for d in result['devices']):raise WorkerError('required_apps_not_ready')
 
+    async def run_once(self,job_id):
+        if not self.config.allow_publish:raise WorkerError('publishing_not_enabled')
+        if self.journal.control('paused')=='1' or self.journal.control('stop')=='1':raise WorkerError('operator_paused')
+        enabled=[d for d in self.config.devices if d.enabled]
+        if not enabled or not all(d.profiles for d in enabled):raise WorkerError('no_validated_device_profiles')
+        for device in enabled:
+            for platform,path in device.profiles.items():
+                profile=Profile.load(path)
+                if profile.platform!=platform or profile.navigation_only or not profile.navigation_verified:raise WorkerError('profile_not_validated')
+        await self.api.heartbeat(self.devices.heartbeat_devices())
+        await self.recover();await self.flush_results()
+        if self.journal.jobs(unfinished=True):raise WorkerError('unfinished_jobs_require_recovery')
+        completed=next((r for r in self.journal.jobs() if r['job_id']==str(job_id) and r['stage']=='published'),None)
+        if completed:return {'job_id':str(job_id),'status':'published','publication_id':completed['publication_id'],'already_completed':True}
+        if not self.devices.resources_ok():raise WorkerError('resources_unavailable')
+        response=await self.api.claim(job_id)
+        if not response.get('job'):raise WorkerError('requested_job_not_available')
+        assignment=Assignment.model_validate(response)
+        if str(assignment.job.id)!=str(job_id):raise WorkerError('requested_job_mismatch')
+        self.devices.configured(assignment.device.external_id)
+        heartbeat=asyncio.create_task(self.heartbeat_loop())
+        try:
+            await self.process(response)
+            row=self.journal.job(str(assignment.job.id),assignment.job.attempts)
+            if row['stage']!='published':raise WorkerError('one_shot_not_published')
+            return {'job_id':str(assignment.job.id),'status':'published','publication_id':row['publication_id']}
+        finally:
+            self.stopping=True;heartbeat.cancel()
+            try:await heartbeat
+            except asyncio.CancelledError:pass
+
     async def run(self,live=False):
         if live:
             enabled=[d for d in self.config.devices if d.enabled]

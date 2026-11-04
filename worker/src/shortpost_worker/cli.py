@@ -20,6 +20,9 @@ def parser():
     sub.add_parser('status');sub.add_parser('pause');sub.add_parser('resume');sub.add_parser('stop')
     token=sub.add_parser('token');token.add_argument('action',choices=['set'])
     run=sub.add_parser('run');run.add_argument('--live',action='store_true')
+    once=sub.add_parser('run-once');once.add_argument('--job-id',required=True,type=uuid.UUID)
+    once.add_argument('--external-id',required=True);once.add_argument('--profile',required=True,type=Path)
+    once.add_argument('--live',action='store_true',required=True,help='Publish exactly the requested server job')
     init=sub.add_parser('init');init.add_argument('--worker-id',required=True,type=uuid.UUID)
     bind=sub.add_parser('bind');bind.add_argument('--external-id',required=True)
     bind.add_argument('--instance',required=True,type=int);bind.add_argument('--serial',required=True)
@@ -45,6 +48,21 @@ async def report_navigation(config,journal,result):
         devices=Engine(config,journal,api).devices.heartbeat_devices()
         await api.heartbeat(devices,capabilities={'navigation_test':result})
         print('Navigation report sent to server.')
+    finally:await api.close()
+
+async def run_once(config,journal,args):
+    from .platforms.profile import Profile
+    selected=next((d for d in config.devices if d.external_id==args.external_id and d.enabled),None)
+    if selected is None:raise WorkerError('device_unavailable')
+    path=args.profile.resolve();profile=Profile.load(path)
+    if profile.navigation_only or not profile.navigation_verified:raise WorkerError('profile_not_validated')
+    # The explicit --live switch authorizes only this process and this job.
+    # Neither TOML nor the persistent Worker admission/pause controls are changed.
+    runtime=config.model_copy(deep=True,update={'allow_publish':True,'max_parallel':1,
+        'auto_install_apps':False,'devices':[selected.model_copy(deep=True,update={'profiles':{profile.platform:path}})]})
+    token=TokenStore(config.state_dir/'token.dpapi',journal.cipher).read()
+    api=Api(runtime,token,journal)
+    try:print(json.dumps(await Engine(runtime,journal,api).run_once(args.job_id),indent=2))
     finally:await api.close()
 
 async def connected(config,journal,command_name,live=False):
@@ -94,6 +112,7 @@ def main():
                     'jobs':[{k:r[k] for k in ('job_id','attempt','device','stage','irreversible_at','updated')} for r in journal.jobs()],
                     'outbox_pending':len(journal.pending()),'analytics_pending':len(journal.due_metrics(float('inf')))},indent=2));return
             with portalocker.Lock(config.state_dir/'worker.lock',timeout=0):
+                if args.command=='run-once':asyncio.run(run_once(config,journal,args));return
                 if args.command=='provision-apps':
                     from .provisioning import prepare_devices
                     result=prepare_devices(config,journal,external_id=args.external_id,check_only=args.check_only)

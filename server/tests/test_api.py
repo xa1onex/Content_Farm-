@@ -88,6 +88,23 @@ def test_worker_isolation_and_no_hash_disclosure(client,seeded):
     tokens=client.get('/api/v1/tokens',headers=auth()).json()
     assert all('token_hash' not in item for item in tokens['items'])
 
+def test_requested_claim_does_not_fall_back_to_another_job(client,seeded):
+    missing=client.post('/api/v1/jobs/claim',json={'job_id':str(uuid.uuid4())},headers=auth('worker'))
+    assert missing.status_code==200 and missing.json().get('job') is None
+    with transaction() as s:assert s.get(Job,seeded['job']).status=='scheduled'
+    selected=client.post('/api/v1/jobs/claim',json={'job_id':str(seeded['job'])},headers=auth('worker'))
+    assert selected.status_code==200 and selected.json()['job']['id']==str(seeded['job'])
+
+def test_requested_claim_preserves_worker_and_account_restrictions(client,seeded):
+    from app.models import Account
+    data={'job_id':str(seeded['job'])}
+    other=client.post('/api/v1/jobs/claim',json=data,headers=auth('worker2'))
+    assert other.status_code==200 and other.json().get('job') is None
+    with transaction() as s:s.get(Account,seeded['account']).status='paused'
+    paused=client.post('/api/v1/jobs/claim',json=data,headers=auth('worker'))
+    assert paused.status_code==200 and paused.json().get('job') is None
+    with transaction() as s:assert s.get(Job,seeded['job']).status=='scheduled'
+
 def test_unknown_requires_operator_reconciliation(client,seeded):
     with transaction() as s:s.get(Job,seeded['job']).status='unknown'
     path=f'/api/v1/jobs/{seeded["job"]}/action'
