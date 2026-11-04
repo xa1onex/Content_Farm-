@@ -22,6 +22,7 @@ from drive_helper import archive_job, save_private_json
 from processor import process_job, ProcessingError, TransientProcessingError
 from autopost import register_job
 from sources import parse_source
+from operations import recovery_changes, report_loop
 
 log = logging.getLogger(__name__)
 dp = Dispatcher()
@@ -30,6 +31,7 @@ busy_users = set()
 scheduled = set()
 user_locks = defaultdict(asyncio.Lock)
 last_submit = {}
+control = None
 
 class PrivateChatMiddleware(BaseMiddleware):
     async def __call__(self,handler,event,data):
@@ -69,6 +71,7 @@ def load_state(job_dir):
 def update_state(job_dir, **changes):
     state = load_state(job_dir)
     state.update(changes)
+    state['updated_at']=datetime.now(timezone.utc).isoformat()
     save_private_json(Path(job_dir)/'state.json',state)
     return state
 
@@ -157,7 +160,7 @@ async def worker(bot):
         status_message = None
         reporter = ProgressReporter(loop,None)
         try:
-            update_state(job_dir,status='processing',error=None)
+            update_state(job_dir,status='processing',error=None,stage='Создаю ролики')
             try:
                 status_message = await reply(bot,state['chat_id'],f'⏳ Задание <code>{state["id"]}</code>: начинаю обработку.')
             except TelegramAPIError:
@@ -167,6 +170,7 @@ async def worker(bot):
                 if state['source']['kind']=='telegram' and not (job_dir/'source.mp4').exists():
                     await download_telegram(bot,job_dir,state['source'])
                 await asyncio.to_thread(process_job,job_dir,reporter.notify)
+            update_state(job_dir,stage='Сохраняю ролики на Google Диск')
             reporter.notify('Сохраняю исходник, ролики и субтитры на Google Диске…')
             try:
                 state = await asyncio.to_thread(archive_job,job_dir)
@@ -174,12 +178,14 @@ async def worker(bot):
                 log.exception('Archive failed for %s',state['id'])
                 state = update_state(job_dir,archived=False,archive_error=type(exc).__name__)
             if state.get('archived') and AUTOPOST_ENABLED:
+                update_state(job_dir,stage='Проверяю ролики для автопостинга')
                 reporter.notify('Регистрирую ID роликов и проверяю доступ для автопостинга…')
                 try:
                     await asyncio.to_thread(register_job,job_dir)
                 except Exception as exc:
                     log.error('Registration failed for %s: %s',state['id'],type(exc).__name__)
                     update_state(job_dir,registered=False,autopost_error=type(exc).__name__)
+            update_state(job_dir,stage='Доставляю результаты в Telegram')
             reporter.notify('Отправляю готовые ролики…')
             await deliver(bot,job_dir)
             state = load_state(job_dir)
@@ -189,12 +195,12 @@ async def worker(bot):
                 clean_archived_job(job_dir)
                 await reporter.edit('✅ Ролики отправлены. Исходник, субтитры и результаты сохранены на Google Диске.',final=True)
             else:
-                update_state(job_dir,status='needs_retry')
+                retry_state=update_state(job_dir,**recovery_changes(state))
                 issue = ('Google Диск пока недоступен' if not state.get('archived') else
                          'регистрация для автопостинга не завершена' if AUTOPOST_ENABLED and not state.get('registered') else
                          'не все ролики доставлены в Telegram')
-                await reporter.edit(f'⚠️ Ролики созданы, но {issue}. Файлы сохранены на сервере.\n'
-                           f'Повторить сохранение и доставку: /retry {state["id"]}',final=True)
+                await reporter.edit(f'⚠️ Ролики созданы, но {issue}. Файлы сохранены на сервере.\n' +
+                           ('Сохранение и доставка повторятся автоматически.' if retry_state['status']=='retry_wait' else f'Нужна проверка. Повтор: /retry {state["id"]}'),final=True)
         except asyncio.CancelledError:
             update_state(job_dir,status='interrupted')
             raise
@@ -212,10 +218,13 @@ async def worker(bot):
                 await reporter.edit(f'⚠️ Gemini пока недоступен. Все файлы сохранены. Повтор: /retry {state["id"]}',final=True)
         except Exception as exc:
             log.exception('Job %s failed',state['id'])
-            update_state(job_dir,status='failed',error=type(exc).__name__)
+            if (job_dir/'manifest.json').exists():
+                state=update_state(job_dir,error=type(exc).__name__,**recovery_changes(load_state(job_dir)))
+            else:
+                state=update_state(job_dir,status='failed',error=type(exc).__name__)
             reporter.done = True
             message = str(exc) if isinstance(exc,(ProcessingError,ValueError)) else 'Не удалось обработать видео. Подробности сохранены в журнале.'
-            error_text = f'❌ {html.escape(message)}\nПовторить: /retry {state["id"]}'
+            error_text = ('⏳ Ролики сохранены. Повторю доставку автоматически.' if state['status']=='retry_wait' else f'❌ {html.escape(message)}\nПовторить: /retry {state["id"]}')
             if status_message:
                 await reporter.edit(error_text,final=True)
             else:
@@ -230,6 +239,9 @@ async def worker(bot):
 
 @dp.message(CommandStart())
 async def start(message:types.Message):
+    if control:
+        await control.menu(message)
+        return
     await message.answer('Пришли ссылку на YouTube или видеофайл из папки бота на Google Диске. '
         'Можно также отправить видео в Telegram (до 20 МБ).\n\n'
         'Я выберу до трёх законченных моментов, сделаю вертикальные ролики с субтитрами '
@@ -244,7 +256,7 @@ async def status(message:types.Message):
         return
     labels = {'queued':'в очереди','processing':'обрабатывается','completed':'готово',
         'failed':'ошибка','needs_retry':'нужен повтор сохранения/отправки',
-        'interrupted':'возобновляется','receiving':'получаю файл','retry_wait':'ожидает автоматического повтора Gemini'}
+        'interrupted':'возобновляется','receiving':'получаю файл','retry_wait':'ожидает автоматического повтора'}
     await message.answer('\n'.join(f'<code>{s["id"]}</code>: {labels.get(s["status"],s["status"])}' for _,s in jobs))
 
 @dp.message(Command('files'))
@@ -349,6 +361,17 @@ async def delayed_retries():
         await asyncio.sleep(5)
 
 async def main():
+    global control
+    panel_config=Path(os.getenv('TELEGRAM_EXTENSION_CONFIG',str(BASE_DIR/'telegram_admin.json')))
+    if panel_config.exists():
+        try:
+            from telegram_admin_extension import install
+        except ModuleNotFoundError as exc:
+            if exc.name!='telegram_admin_extension':raise
+            import sys
+            sys.path.insert(0,str(BASE_DIR.parent/'server'))
+            from app.telegram_admin.extension import install
+        control=install(dp,str(panel_config))
     token = os.getenv('BOT_TOKEN')
     if not token:
         raise RuntimeError('BOT_TOKEN is not set')
@@ -361,8 +384,10 @@ async def main():
     bot = Bot(token=token,default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     task = asyncio.create_task(worker(bot))
     retry_task = None
+    operations_task=asyncio.create_task(report_loop())
     try:
         await bot.set_my_commands([
+            types.BotCommand(command='panel',description='Состояние и управление системой'),
             types.BotCommand(command='start',description='Как пользоваться ботом'),
             types.BotCommand(command='status',description='Мои задания'),
             types.BotCommand(command='files',description='Мои результаты на Google Диске'),
@@ -374,6 +399,9 @@ async def main():
         retry_task = asyncio.create_task(delayed_retries())
         await dp.start_polling(bot,close_bot_session=False)
     finally:
+        operations_task.cancel()
+        try:await operations_task
+        except asyncio.CancelledError:pass
         if retry_task:
             retry_task.cancel()
             try:await retry_task

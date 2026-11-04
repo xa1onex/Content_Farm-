@@ -326,9 +326,10 @@ def claim_notification(request:Request,s=DB,actor=ADMIN):
         .with_for_update(skip_locked=True).limit(1))
     if not delivery:return {'delivery':None}
     delivery.status='sending';delivery.attempts+=1;delivery.next_at=now()+timedelta(seconds=90)
+    from app.telegram_admin.notifications import notification_text
     ev=s.get(Event,delivery.event_id)
     return {'delivery':{'event_id':ev.id,'chat_id':delivery.chat_id,'attempt':delivery.attempts,
-        'text':f'Автопостинг: {ev.kind}\n{ev.detail}'}}
+        'text':notification_text(ev)}}
 class NotificationResult(Input):
     attempt:int
     delivered:bool
@@ -371,3 +372,23 @@ def rotate_worker_token(worker_id:UUID,request:Request,s=DB,actor=ADMIN):
     for token in s.scalars(select(ApiToken).where(ApiToken.worker_id==worker_id)):token.enabled=False
     raw=new_token();item=ApiToken(token_hash=digest(raw),role='worker',worker_id=worker_id,label=worker.name)
     s.add(item);s.flush();return {'worker_id':worker_id,'token_id':item.id,'token':raw}
+
+class FarmHeartbeat(Input):
+    counts:dict[str,int]
+    active:list[dict] = []
+    drive:dict = {}
+    disk_free_gb:float
+
+@router.post('/farm/heartbeat')
+@idempotent
+def farm_heartbeat(data:FarmHeartbeat,request:Request,s=DB,actor=FARM):
+    value=data.model_dump()|{'at':now().isoformat()}
+    item=s.get(Setting,'farm_heartbeat',with_for_update=True)
+    if item:item.value=value
+    else:s.add(Setting(key='farm_heartbeat',value=value))
+    return {'received':True}
+
+@router.get('/operations/overview')
+def operations_overview(s=DB,actor=ADMIN):
+    from app.operations import overview
+    return overview(s)

@@ -30,13 +30,13 @@ def tick():
         for account in s.scalars(select(Account).where(Account.status=='active')):
             tomorrow=now().astimezone(ZoneInfo(account.timezone)).date()+timedelta(days=1)
             created+=generate(s,tomorrow,[account.id])['created']
-        for worker in s.scalars(select(Worker).where(Worker.enabled.is_(True),
-            Worker.heartbeat_at<now()-timedelta(seconds=settings().heartbeat_timeout))):
-            event(s,'worker_offline',f'offline:{worker.id}:{worker.heartbeat_at.isoformat()}',{'worker_id':str(worker.id)})
         heartbeat=s.get(Setting,'scheduler_heartbeat')
         value={'at':now().isoformat(),'expired_leases':expired,'created_jobs':created}
         if heartbeat:heartbeat.value=value
         else:s.add(Setting(key='scheduler_heartbeat',value=value))
+        from app.operations import monitor
+        s.flush()
+        monitor(s)
         # Idempotency records retained 30 days; job/event identities remain permanent.
         s.execute(delete(RateBucket).where(RateBucket.minute<int(time.time()//60)-5))
         s.execute(delete(Idempotency).where(Idempotency.created_at<now()-timedelta(days=30)))

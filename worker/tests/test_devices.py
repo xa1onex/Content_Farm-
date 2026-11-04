@@ -62,3 +62,14 @@ def test_config_rejects_plain_http_and_duplicate_devices(tmp_path):
     with pytest.raises(ValueError):Config(worker_id='00000000-0000-4000-8000-000000000001',api_url='http://server/api/v1',state_dir=tmp_path)
     device={'external_id':'mumu-01','instance_index':0,'android_id':'identity'}
     with pytest.raises(ValueError):Config(worker_id='00000000-0000-4000-8000-000000000001',devices=[device,device],state_dir=tmp_path)
+
+
+def test_pinned_isolated_endpoint_survives_mumu_nat_port_change(config,journal,monkeypatch):
+    config.mumu_manager=Path('MuMuManager.exe')
+    config.devices[0].adb_endpoint='127.0.0.1:16384'
+    monkeypatch.setattr(MuMu,'info',lambda *a:{'is_android_started':True})
+    monkeypatch.setattr(MuMu,'endpoint',lambda *a:'127.0.0.1:16385')
+    monkeypatch.setattr('shortpost_worker.devices.command',lambda *a,**kw:'connected')
+    monkeypatch.setattr(ADB,'run',lambda *a,**kw:'device')
+    monkeypatch.setattr(ADB,'shell',lambda self,*args,**kw:'1' if args[0]=='getprop' else config.devices[0].android_id)
+    assert Devices(config,journal).connect(config.devices[0]).serial=='127.0.0.1:16384'

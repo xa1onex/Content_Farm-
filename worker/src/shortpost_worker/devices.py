@@ -113,7 +113,12 @@ class Devices:
             deadline=time.monotonic()+90
             while True:
                 if guard:guard.check()
-                try:endpoint=manager.endpoint(device.instance_index);break
+                try:
+                    discovered=manager.endpoint(device.instance_index)
+                    # A configured loopback bridge belongs to the isolated network.
+                    # MuMu may allocate a different NAT port after restart.
+                    endpoint=device.adb_endpoint or discovered
+                    break
                 except WorkerError:
                     if time.monotonic()>deadline:raise WorkerError('mumu_boot_timeout')
                     time.sleep(2)

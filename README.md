@@ -88,3 +88,7 @@ powershell -NoProfile -File .\scripts\start-worker.ps1
 ```
 
 CI проверяет Worker на Linux и Windows; PostgreSQL contract job — отдельно на Ubuntu. Реальные публикации/эмуляторы в CI не используются. Дополнительные документы: [ARCHITECTURE](worker/ARCHITECTURE.md), [API_INTEGRATION](worker/API_INTEGRATION.md), [RECOVERY](worker/RECOVERY.md).
+
+## Управление и автоматическое восстановление
+
+[Инструкция для пользователя и схема контроля](docs/OPERATIONS_RU.md). Панель Telegram: `/panel`. Постоянная диагностика различает связь с ПК, эмулятор, прокси и готовность аккаунтов.

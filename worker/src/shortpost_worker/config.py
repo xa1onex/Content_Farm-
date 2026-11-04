@@ -12,6 +12,7 @@ class DeviceConfig(Strict):
     instance_index:int=Field(ge=0,le=999)
     android_id:str=Field(min_length=8,max_length=100)
     enabled:bool=True
+    proxy_expected_ip:str|None=None
     adb_endpoint:str|None=None
     appium_url:str='http://127.0.0.1:4723'
     system_port:int=Field(default=8200,ge=1024,le=65535)
@@ -20,6 +21,9 @@ class DeviceConfig(Strict):
     def local(self):
         if urlsplit(self.appium_url).hostname not in ('127.0.0.1','localhost','::1'):
             raise ValueError('Appium must listen on loopback')
+        if self.proxy_expected_ip:
+            import ipaddress
+            ipaddress.IPv4Address(self.proxy_expected_ip)
         if set(self.profiles)-{'tiktok','instagram','youtube'}:raise ValueError('Unsupported platform profile')
         if self.adb_endpoint and not self.adb_endpoint.startswith('127.0.0.1:'):
             raise ValueError('ADB endpoint must be loopback')

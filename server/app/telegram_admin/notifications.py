@@ -17,3 +17,19 @@ def enqueue():
                 s.execute(insert(NotificationDelivery).values(event_id=event.id,chat_id=subscriber.chat_id)
                     .on_conflict_do_nothing())
 
+
+
+def notification_text(ev):
+    import html
+    from app.operations import LABELS
+    detail=ev.detail or {}
+    if ev.kind in ('system_problem','system_recovered'):
+        prefix='✅ Восстановлено: ' if ev.kind=='system_recovered' else '⚠️ '
+        text=prefix+detail.get('message',LABELS.get(detail.get('code'),'Требуется проверка системы'))
+        if detail.get('account'):text+=' · '+detail['account']
+    else:
+        labels={'worker_offline':'Нет связи с ПК','drive_unavailable':'Нет доступа к ролику на Google Диске',
+          'content_shortage':'Для расписания не хватает новых роликов','scheduler_error':'Ошибка планировщика',
+          'publication_unknown':'Нужно проверить результат публикации'}
+        text='⚠️ '+labels.get(ev.kind,'Заданию требуется внимание')
+    return html.escape(text)+'\nОткрыть состояние: /panel'

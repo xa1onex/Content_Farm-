@@ -4,7 +4,7 @@ from fastapi import HTTPException
 from sqlalchemy import select, func, exists, and_
 from app.config import settings
 from app.db import now
-from app.models import Job, Worker, Device, Account, Clip, Attempt, JobEvent, Publication
+from app.models import Job, Worker, Device, Account, Clip, Attempt, JobEvent, Publication, Setting
 from app.errors import require, event
 from app.security import digest
 from app.api.common import record
@@ -17,6 +17,8 @@ def worker_ready(worker):
 def claim(s,worker_id,job_id=None):
     w=require(s,Worker,worker_id,locked=True)
     if not worker_ready(w):raise HTTPException(409,'Worker must be enabled and send a heartbeat')
+    control=s.get(Setting,'scheduler')
+    if control and not control.value.get('enabled',True):return {'job':None}
     busy_count=s.scalar(select(func.count()).select_from(Job).where(Job.worker_id==w.id,Job.status.in_(ACTIVE)))
     if busy_count>=w.max_parallel:return {'job':None}
     busy_devices=select(Job.device_id).where(Job.status.in_(ACTIVE),Job.device_id.is_not(None))
@@ -35,6 +37,9 @@ def claim(s,worker_id,job_id=None):
         device=s.scalar(select(Device).where(Device.id==account.device_id).with_for_update(skip_locked=True))
         if not device:continue
         if s.scalar(select(Job.id).where(Job.device_id==device.id,Job.status.in_(ACTIVE)).limit(1)):continue
+        if 'runtime' in w.capabilities:
+            from app.operations import account_blockers
+            if account_blockers(account,w,device):continue
         allowed=device.capabilities.get('platforms') or w.capabilities.get('platforms')
         if allowed and account.platform not in allowed:continue
         from app.scheduler.service import enforce_execution_limits,compatible

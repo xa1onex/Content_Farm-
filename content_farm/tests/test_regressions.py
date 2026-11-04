@@ -198,12 +198,14 @@ class WorkerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_drive_failure_delivers_but_keeps_files(self):
         state,exists,_=await self.run_job(archive_fails=True)
-        self.assertEqual(state['status'],'needs_retry')
+        self.assertEqual(state['status'],'retry_wait')
+        self.assertEqual(state['pipeline_retry_count'],1)
         self.assertTrue(state['delivered']);self.assertTrue(exists)
 
     async def test_telegram_failure_keeps_files(self):
         state,exists,_=await self.run_job(delivery_fails=True)
-        self.assertEqual(state['status'],'needs_retry')
+        self.assertEqual(state['status'],'retry_wait')
+        self.assertEqual(state['pipeline_retry_count'],1)
         self.assertFalse(state['delivered']);self.assertTrue(exists)
 
 if __name__=='__main__':unittest.main()

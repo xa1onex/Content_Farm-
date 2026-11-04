@@ -36,6 +36,7 @@ class Engine:
         self.devices=devices or Devices(config,journal)
         self.publisher_factory=publisher_factory;self.session_factory=session_factory
         self.tasks=set();self.stopping=False;self.executing=set()
+        self.device_health={};self.live=False
         self.media_dir=config.state_dir/'media';self.media_dir.mkdir(parents=True,exist_ok=True)
     async def renew(self,assignment,guard):
         pending=None
@@ -191,9 +192,23 @@ class Engine:
             if row['stage']=='result_pending' and row['result'] and row['job_id'] not in active:
                 try:await self.report(row)
                 except WorkerError:pass
+    async def send_heartbeat(self):
+        devices=self.devices.heartbeat_devices()
+        for device in devices:
+            device['capabilities']['health']=self.device_health.get(device['external_id'],{})
+        return await self.api.heartbeat(devices,capabilities={'runtime':{'running':True,
+          'live':self.live,'allow_publish':self.live and self.config.allow_publish,
+          'paused':self.journal.control('paused')=='1'}})
+    async def health_loop(self):
+        from .health import device_health
+        while not self.stopping:
+            enabled=[d for d in self.config.devices if d.enabled]
+            results=await asyncio.gather(*(asyncio.to_thread(device_health,self.config,d) for d in enabled),return_exceptions=True)
+            self.device_health={d.external_id:(value if isinstance(value,dict) else {}) for d,value in zip(enabled,results)}
+            await asyncio.sleep(60)
     async def heartbeat_loop(self):
         while not self.stopping:
-            try:await self.api.heartbeat(self.devices.heartbeat_devices())
+            try:await self.send_heartbeat()
             except WorkerError as exc:log.warning('heartbeat_error code=%s status=%s',exc.code,exc.status)
             await asyncio.sleep(30)
     async def analytics_loop(self):
@@ -292,10 +307,12 @@ class Engine:
                     if profile.navigation_only:raise WorkerError('profile_navigation_only')
                     if profile.platform!=platform or not profile.navigation_verified:
                         raise WorkerError('profile_not_validated')
+        self.live=live
         self.journal.control('stop','0')
-        await self.api.heartbeat(self.devices.heartbeat_devices())
+        await self.send_heartbeat()
         await self.recover()
         heartbeat=asyncio.create_task(self.heartbeat_loop())
+        health=asyncio.create_task(self.health_loop())
         analytics=None
         last_recovery=time.monotonic()
         try:
@@ -329,7 +346,7 @@ class Engine:
             # Keep heartbeats/renewals alive until all active publication attempts finish.
             if self.tasks:await asyncio.gather(*self.tasks,return_exceptions=True)
             self.stopping=True
-            for task in (heartbeat,analytics):
+            for task in (heartbeat,analytics,health):
                 if task is None:continue
                 task.cancel()
                 try:await task

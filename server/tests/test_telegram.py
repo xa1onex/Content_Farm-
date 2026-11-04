@@ -37,3 +37,16 @@ def test_install_does_not_add_polling_consumer(tmp_path):
     config=tmp_path/'telegram.json';config.write_text(json.dumps({'api_url':'http://127.0.0.1:8108','api_token':'test','allow_all':True}))
     dispatcher=Dispatcher();install(dispatcher,str(config))
     assert dispatcher.startup.handlers and dispatcher.shutdown.handlers
+
+
+def test_panel_reports_readiness_without_raw_json(monkeypatch):
+    extension=AdminExtension({'allow_all':True});answers=[]
+    async def api(*args,**kwargs):return {'farm':{'online':True},'scheduler':{'online':True,'enabled':True},
+        'ready_clips':9,'accounts':[{'ready':False}],'published_24h':0,
+        'problems':[{'message':'Нет связи с ПК','account':'example'}]}
+    async def answer(self,text,**kwargs):answers.append(text)
+    monkeypatch.setattr(extension,'api',api);monkeypatch.setattr(types.Message,'answer',answer)
+    asyncio.run(extension.dashboard(message()))
+    assert 'Готовых роликов: 9' in answers[0]
+    assert 'Нет связи с ПК · example' in answers[0]
+    assert '<pre>' not in answers[0]
