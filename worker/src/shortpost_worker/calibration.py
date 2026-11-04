@@ -1,5 +1,6 @@
 """Owner-operated inspection and dry navigation. No method invokes submit()."""
-import json,time,uuid,xml.etree.ElementTree as ET
+import hashlib,json,sys,time,uuid,xml.etree.ElementTree as ET
+from datetime import datetime,timezone
 from pathlib import Path
 from .appium_session import Session
 from .devices import Devices,probe_video
@@ -71,6 +72,11 @@ def test_navigation(config,journal,external_id,platform,username,video,profile_p
         publisher.open_upload();publisher.fill_metadata();publisher.find(profile.submit)
         profile_path.write_text(profile.model_dump_json(indent=2),encoding='utf-8')
         print('Navigation verified. Stopped BEFORE Publish. Success detection and real posting are still unverified.')
+        with Path(video).open('rb') as input_file:checksum=hashlib.file_digest(input_file,'sha256').hexdigest()
+        return {'test_type':'navigation_only','host_platform':sys.platform,'external_id':external_id,
+            'platform':platform,'username':username,'app_version':profile.app_version,'locale':profile.locale,
+            'input_sha256':checksum,'stopped_before_publish':True,'published':False,
+            'tested_at':datetime.now(timezone.utc).isoformat()}
     finally:
         session.close()
         if remote:

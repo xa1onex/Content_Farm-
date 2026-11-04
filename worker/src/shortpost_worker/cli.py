@@ -35,7 +35,17 @@ def parser():
     nav.add_argument('--platform',required=True,choices=['tiktok','instagram','youtube'])
     nav.add_argument('--username',required=True);nav.add_argument('--video',required=True,type=Path)
     nav.add_argument('--profile',type=Path,help='Diagnostic profile override; does not change device configuration')
+    nav.add_argument('--report-server',action='store_true',help='Send successful diagnostic metadata in a Worker heartbeat; no job or publication is created')
     return p
+
+async def report_navigation(config,journal,result):
+    token=TokenStore(config.state_dir/'token.dpapi',journal.cipher).read()
+    api=Api(config,token,journal)
+    try:
+        devices=Engine(config,journal,api).devices.heartbeat_devices()
+        await api.heartbeat(devices,capabilities={'navigation_test':result})
+        print('Navigation report sent to server.')
+    finally:await api.close()
 
 async def connected(config,journal,command_name,live=False):
     token=TokenStore(config.state_dir/'token.dpapi',journal.cipher).read()
@@ -108,7 +118,9 @@ def main():
                     inspect(config,journal,args.external_id,getattr(args,'output',None));return
                 if args.command=='test-navigation':
                     from .calibration import test_navigation
-                    test_navigation(config,journal,args.external_id,args.platform,args.username,args.video,profile_path=args.profile);return
+                    result=test_navigation(config,journal,args.external_id,args.platform,args.username,args.video,profile_path=args.profile)
+                    if args.report_server:asyncio.run(report_navigation(config,journal,result))
+                    return
                 if args.command=='run' and args.live and not config.allow_publish:
                     raise RuntimeError('Live mode requires explicit allow_publish=true in local config')
                 asyncio.run(connected(config,journal,args.command,live=getattr(args,'live',False)))

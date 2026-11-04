@@ -73,14 +73,14 @@ class Api:
         pending=self.journal.pending('claim')
         if pending:return await self.send_operation(pending[0])
         return await self.mutate('claim','/jobs/claim',{})
-    async def heartbeat(self,devices):
+    async def heartbeat(self,devices,*,capabilities=None):
         pending=self.journal.pending('heartbeat')
         if pending:
             response=await self.send_operation(pending[0])
             # A replayed heartbeat is not a fresh server clock observation.
             self.clock.synced=False
         response=await self.mutate('heartbeat','/workers/heartbeat',
-            {'capabilities':{'worker_version':'0.1.0'},'devices':devices})
+            {'capabilities':dict(capabilities or {})|{'worker_version':'0.1.0'},'devices':devices})
         self.clock.sync(response['server_time'])
         if response.get('worker_id')!=str(self.config.worker_id):raise WorkerError('worker_token_identity_mismatch')
         return response

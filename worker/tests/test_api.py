@@ -85,6 +85,22 @@ async def test_heartbeat_syncs_server_time_and_identity(config,journal):
     finally:await api.close()
 
 @pytest.mark.asyncio
+async def test_navigation_report_only_uses_heartbeat_and_preserves_worker_version(config,journal):
+    seen=[]
+    def handler(request):
+        seen.append(request)
+        return httpx.Response(200,json={'worker_id':str(config.worker_id),'server_time':'2026-11-01T12:00:00+00:00'})
+    api=Api(config,'private-token',journal,httpx.MockTransport(handler))
+    report={'test_type':'navigation_only','stopped_before_publish':True,'published':False}
+    try:
+        await api.heartbeat([],capabilities={'navigation_test':report,'worker_version':'ignored'})
+        assert len(seen)==1 and seen[0].url.path.endswith('/workers/heartbeat')
+        body=json.loads(seen[0].content)
+        assert body['capabilities']=={'worker_version':'0.1.0','navigation_test':report}
+        assert b'private-token' not in seen[0].content
+    finally:await api.close()
+
+@pytest.mark.asyncio
 async def test_idle_server_response_can_omit_job(config,journal):
     api=Api(config,'token',journal,httpx.MockTransport(lambda _:httpx.Response(200,json={})))
     try:assert not (await api.claim()).get('job')

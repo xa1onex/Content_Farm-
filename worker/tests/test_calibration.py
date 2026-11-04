@@ -1,4 +1,4 @@
-import json
+import hashlib,json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -21,7 +21,7 @@ def test_diagnostic_profile_override_never_submits_or_changes_device_binding(con
     monkeypatch.setitem(calibration.PUBLISHERS,'instagram',lambda *args:publisher)
     monkeypatch.setattr('shortpost_worker.devices.command',lambda *args:json.dumps({'format':{'duration':'3.0'}}))
     video=tmp_path/'clip.mp4';video.write_bytes(b'diagnostic')
-    calibration.test_navigation(config,journal,'mumu-01','instagram','example',video,profile_path=local)
+    result=calibration.test_navigation(config,journal,'mumu-01','instagram','example',video,profile_path=local)
     publisher.verify_account.assert_called_once()
     publisher.prepare_media.assert_called_once_with(video)
     publisher.open_upload.assert_called_once();publisher.fill_metadata.assert_called_once()
@@ -32,9 +32,12 @@ def test_diagnostic_profile_override_never_submits_or_changes_device_binding(con
     saved=json.loads(local.read_text(encoding='utf-8'))
     assert saved['navigation_verified'] is True and saved['navigation_only'] is True
     assert json.loads(preset.read_text(encoding='utf-8'))['navigation_verified'] is False
+    assert result['input_sha256']==hashlib.sha256(b'diagnostic').hexdigest()
+    assert result['stopped_before_publish'] is True and result['published'] is False
+    assert result['username']=='example' and 'lease_token' not in result
 
 
 def test_cli_accepts_diagnostic_profile_override():
     args=parser().parse_args(['test-navigation','--external-id','mumu-01','--platform','instagram',
-        '--username','example','--video','clip.mp4','--profile','instagram.local.json'])
-    assert args.profile==Path('instagram.local.json')
+        '--username','example','--video','clip.mp4','--profile','instagram.local.json','--report-server'])
+    assert args.profile==Path('instagram.local.json') and args.report_server
