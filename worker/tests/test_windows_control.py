@@ -61,6 +61,7 @@ function Set-Service { throw 'UNEXPECTED_SERVICE_CHANGE' }
 function Start-Service { throw 'UNEXPECTED_SERVICE_CHANGE' }
 function Stop-Service { throw 'UNEXPECTED_SERVICE_CHANGE' }
 & $env:SHORTPOST_CONTROL_SCRIPT -ConnectionFile $env:SHORTPOST_CONNECTION
+exit $LASTEXITCODE
 ''')
     result = subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive',
         '-ExecutionPolicy', 'Bypass', '-File', str(harness)], capture_output=True, text=True,
