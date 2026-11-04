@@ -107,6 +107,8 @@ class Journal:
         assignment=self.open(row['assignment']);payload=self.open(row['result'])
         with self.transaction() as db:
             stage=response['status']
+            if stage=='retry_wait' and payload.get('outcome')=='safe_failure' and not row['irreversible_at']:
+                stage='abandoned'  # This attempt is finished; a new fenced attempt may follow.
             db.execute('UPDATE jobs SET stage=?,publication_id=?,updated=? WHERE job_id=? AND attempt=?',
                 (stage,response.get('publication_id'),time.time(),id,attempt))
             if stage=='published' and response.get('publication_id'):

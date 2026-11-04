@@ -38,7 +38,7 @@ def real_server(config,journal,monkeypatch):
         clip=Clip(passport='ENTERTAINMENT-REACTION-000001',drive_file_id='integration-only-file',title='Test',description='Test caption',
             category_id=cat.id,format_id=fmt.id,duration_seconds=20,sha256=hashlib.sha256(b'test-video').hexdigest(),status='ready',verified_at=now())
         s.add(clip);s.flush()
-        job=Job(clip_id=clip.id,account_id=account.id,local_date=now().date(),slot=1,scheduled_at=now()-timedelta(seconds=1))
+        job=Job(platform='tiktok',clip_id=clip.id,account_id=account.id,local_date=now().date(),slot=1,scheduled_at=now()-timedelta(seconds=1))
         s.add_all([job,ApiToken(token_hash=digest('integration-worker-token'),role='worker',worker_id=worker.id,label='Test')]);s.flush()
         job_id=job.id
     config.api_url='https://shortpost.test/api/v1'

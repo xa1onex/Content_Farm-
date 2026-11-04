@@ -112,3 +112,16 @@ def test_new_server_process_recovers_persisted_processing_as_unknown(seeded):
     process=subprocess.run([sys.executable,'-c',code],capture_output=True,text=True,timeout=20)
     assert process.returncode==0,process.stderr
     with transaction() as s:assert s.get(Job,seeded['job']).status=='unknown'
+
+
+def test_temporary_failure_before_publish_retries_same_job_with_new_lease(seeded):
+    with transaction() as s:
+        raw=claim(s,seeded['worker'])['lease_token']
+        acknowledge(s,seeded['job'],seeded['worker'],LeaseEvent(**event(raw)))
+        response=result(s,seeded['job'],seeded['worker'],Result(**event(raw,outcome='safe_failure',no_publish_attempted=True,error_code='network_error')))
+        assert response['status']=='retry_wait'
+        job=s.get(Job,seeded['job']);assert job.scheduled_at>now()
+        job.scheduled_at=now()-timedelta(seconds=1)
+    with transaction() as s:
+        assignment=claim(s,seeded['worker'])
+        assert assignment['job']['id']==seeded['job'] and assignment['lease_token']!=raw

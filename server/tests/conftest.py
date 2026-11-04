@@ -37,13 +37,13 @@ def seeded():
         s.add_all([cat,fmt,topic,w,w2]);s.flush()
         device=Device(worker_id=w.id,external_id='mumu-1',name='MuMu 1');s.add(device);s.flush()
         account=Account(platform='tiktok',name='Test',username='test',worker_id=w.id,device_id=device.id,
-            timezone='UTC',status='active',daily_limit=5,windows=[{'start':'00:00','end':'23:59'}],min_interval_minutes=1)
+            timezone='UTC',status='active',daily_limit=5,warmup_enabled=False,windows=[{'start':'00:00','end':'23:59'}],min_interval_minutes=1)
         s.add(account);s.flush()
         clip=Clip(passport='ENTERTAINMENT-REACTION-000001',drive_file_id='drive-file-one',
             title='Test clip',category_id=cat.id,topic_id=topic.id,format_id=fmt.id,duration_seconds=20,
             status='ready',verified_at=now(),sha256='a'*64)
         s.add(clip);s.flush()
-        job=Job(clip_id=clip.id,account_id=account.id,local_date=now().date(),slot=1,
+        job=Job(platform='tiktok',clip_id=clip.id,account_id=account.id,local_date=now().date(),slot=1,
             scheduled_at=now()-timedelta(seconds=2));s.add(job)
         s.add_all([ApiToken(token_hash=digest('worker-test-token'),role='worker',label='w',worker_id=w.id),
             ApiToken(token_hash=digest('worker2-test-token'),role='worker',label='w2',worker_id=w2.id)])

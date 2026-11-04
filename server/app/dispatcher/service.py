@@ -118,6 +118,8 @@ def publish(s,job,external_id,url,published_at):
     account=require(s,Account,job.account_id,locked=True)
     if not account.last_published_at or published_at>account.last_published_at:account.last_published_at=published_at
     s.flush()
+    event(s,'publication_published','published:'+str(job.id),
+      {'platform':account.platform,'username':account.username,'url':url},'info')
     return publication
 
 def result(s,job_id,worker_id,data):
@@ -133,10 +135,15 @@ def result(s,job_id,worker_id,data):
         pub_id=pub.id
     elif data.outcome=='safe_failure':
         if job.status=='unknown':raise HTTPException(409,'Unknown outcome requires operator reconciliation')
-        job.status='failed';job.lease_until=None;pub_id=None
+        transient={'network_error','drive_unavailable','media_download_failed','rate_limited',
+          'device_command_failed','adb_connect_timeout','mumu_boot_timeout','appium_unavailable','worker_restarted'}
+        retry=data.error_code in transient and job.attempts<job.max_attempts
+        job.status='retry_wait' if retry else 'failed'
+        job.lease_until=None;pub_id=None
+        if retry:job.scheduled_at=now()+timedelta(seconds=min(600,60*2**job.attempts))
         if data.error_code in ('captcha','platform_block','login_required'):
             require(s,Account,job.account_id,locked=True).status='attention'
-        event(s,'publication_failed',f'failed:{job.id}:{job.attempts}',
+        if not retry:event(s,'publication_failed',f'failed:{job.id}:{job.attempts}',
             {'job_id':str(job.id),'code':data.error_code})
     else:
         job.status='unknown';job.lease_until=None;pub_id=None

@@ -12,7 +12,10 @@ if ($Live) { $WorkerArgs += ' -Live' }
 foreach ($Item in @(@('ShortPost Appium',$AppiumArgs),@('ShortPost Worker',$WorkerArgs))) {
     $Action = New-ScheduledTaskAction -Execute $PowerShell -Argument $Item[1] -WorkingDirectory $Repo
     $Existing = Get-ScheduledTask -TaskName $Item[0] -ErrorAction SilentlyContinue
-    if ($Existing -and $Existing.State -eq 'Running') { throw ('Task already running: ' + $Item[0]) }
+    if ($Existing -and $Existing.State -eq 'Running') {
+        if ($Item[0] -eq 'ShortPost Appium' -and $Existing.Actions[0].Arguments -eq $Item[1]) { continue }
+        throw ('Stop this ShortPost task before changing its mode: ' + $Item[0])
+    }
     Register-ScheduledTask -TaskName $Item[0] -Action $Action -Principal $Principal -Trigger $Trigger -Settings $Settings -Force | Out-Null
 }
 Start-ScheduledTask -TaskName 'ShortPost Appium'

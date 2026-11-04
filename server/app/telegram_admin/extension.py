@@ -54,8 +54,12 @@ class AdminExtension:
               'Планировщик: '+('нет связи' if not sched['online'] else 'работает' if sched['enabled'] else 'пауза'),
               f"Готовых роликов: {data['ready_clips']}",
               f"Готовых аккаунтов: {sum(a['ready'] for a in data['accounts'])} из {len(data['accounts'])}",
-              f"Публикаций за 24 часа: {data['published_24h']}"]
+              f"Публикаций за 24 часа: {data['published_24h']}",
+              'Разгон аккаунтов: 1 → 1 → 2 → 3 ролика/день',
+              'Один ролик — один раз на каждой платформе.']
             if data['problems']:lines+=['','Требует внимания:']+[p['message']+(' · '+p['account'] if p.get('account') else '') for p in data['problems'][:5]]
+            pool=data.get('available_by_platform',{})
+            if pool:lines+=['Свободно: Instagram '+str(pool.get('instagram',0))+' · TikTok '+str(pool.get('tiktok',0))+' · Shorts '+str(pool.get('youtube',0))]
         elif section=='farm':
             counts=farm.get('counts',{})
             lines=['Контентферма: '+('работает' if farm['online'] else 'нет связи'),
@@ -96,7 +100,7 @@ class AdminExtension:
         lines.append(names.get(section,'Система'))
         for item in result.get('items',[]):
             if section=='accounts':
-                lines.append(item['platform']+' · @'+item['username']+' · '+statuses.get(item['status'],item['status'])+f" · {item['daily_limit']}/день")
+                lines.append(item['platform']+' · @'+item['username']+' · '+statuses.get(item['status'],item['status'])+f" · сегодня {item.get('effective_daily_limit',item['daily_limit'])}/день")
                 rows.append([('@'+item['username']+' · управление','account_view:'+item['id'])])
             elif section=='content':
                 lines.append(item['title'][:180]+' · '+statuses.get(item['status'],item['status']))
@@ -165,7 +169,7 @@ class AdminExtension:
         if not re.fullmatch(r'[A-Za-z0-9_.-]{1,100}',username):
             await message.answer('Имя не распознано. Открой «Аккаунты → Добавить аккаунт» и укажи имя без ссылки.');return
         result=await self.api('POST','/api/v1/accounts',{'name':username,'username':username,'platform':form['platform'],
-          'worker_id':form['worker_id'],'device_id':form['device_id'],'status':'paused','daily_limit':1,'timezone':'Europe/Moscow'})
+          'worker_id':form['worker_id'],'device_id':form['device_id'],'status':'paused','daily_limit':3,'warmup_enabled':True,'timezone':'Europe/Moscow'})
         await message.answer('Аккаунт добавлен. Его готовность видна в состоянии системы.' if 'error' not in result else 'Не удалось добавить аккаунт: возможно, он уже привязан к этому эмулятору.',reply_markup=self.buttons([[('Состояние','overview'),('Аккаунты','accounts:0')]]))
     async def message(self,message):
         if not self.allowed(message):
@@ -239,7 +243,7 @@ class AdminExtension:
             identifier=payload.split(':',1)[1]
             account=await self.api('GET','/api/v1/accounts/'+identifier)
             if 'error' in account:await message.answer('Аккаунт недоступен.');return
-            await message.answer(html.escape('@'+account['username']+' · '+account['platform']+f"\nПубликаций в день: {account['daily_limit']}\nЧасовой пояс: {account['timezone']}"),reply_markup=self.buttons([[('Пауза' if account['status']=='active' else 'Включить','account:'+identifier)],[('1/день','limit:'+identifier+':1'),('2/день','limit:'+identifier+':2'),('3/день','limit:'+identifier+':3')],[('Аккаунты','accounts:0')]]));return
+            await message.answer(html.escape('@'+account['username']+' · '+account['platform']+f"\nСегодня: {account.get('effective_daily_limit',account['daily_limit'])} роликов\nРазгон: 1 → 1 → 2 → 3\nЧасовой пояс: {account['timezone']}"),reply_markup=self.buttons([[('Пауза' if account['status']=='active' else 'Включить','account:'+identifier)],[('Максимум 1','limit:'+identifier+':1'),('Максимум 2','limit:'+identifier+':2'),('Максимум 3','limit:'+identifier+':3')],[('Аккаунты','accounts:0')]]));return
         if payload.startswith('limit:'):
             _,identifier,limit=payload.split(':')
             await self.review(message,query.from_user.id,'PATCH','/api/v1/accounts/'+identifier,{'daily_limit':int(limit)});return

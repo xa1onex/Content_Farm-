@@ -39,3 +39,23 @@ def test_global_pause_blocks_new_claims_but_does_not_change_jobs(client,seeded):
     client.post('/api/v1/schedules/control',headers=auth(),json={'enabled':False})
     r=client.post('/api/v1/jobs/claim',headers=auth('worker'),json={})
     assert r.status_code==200 and r.json().get('job') is None
+
+
+def test_warmup_starts_only_when_fully_ready_and_never_resets(seeded):
+    from app.models import Account
+    from app.scheduler.service import start_ready_accounts,daily_quota
+    from zoneinfo import ZoneInfo
+    with transaction() as s:
+        a=s.get(Account,seeded['account']);a.warmup_enabled=True;a.daily_limit=3
+        start_ready_accounts(s);assert a.operational_started_at is None
+        s.get(Worker,seeded['worker']).capabilities={'runtime':{'running':True,'allow_publish':True,'paused':False}}
+        s.get(Device,seeded['device']).capabilities={'health':{'at':now().isoformat(),'online':True,'identity_verified':True,
+          'profiles':{'tiktok':{'verified':True}},'network':{'at':now().isoformat(),'ready':True}}}
+        s.flush();start_ready_accounts(s)
+        started=a.operational_started_at;assert started
+        day=started.astimezone(ZoneInfo(a.timezone)).date()
+        assert [daily_quota(a,day+timedelta(days=i)) for i in range(6)]==[1,1,2,3,3,3]
+        a.status='paused';s.flush();start_ready_accounts(s)
+        assert a.operational_started_at==started
+        a.status='active';s.flush();start_ready_accounts(s)
+        assert a.operational_started_at==started

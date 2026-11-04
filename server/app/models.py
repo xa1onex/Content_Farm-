@@ -77,7 +77,9 @@ class Account(Identity, Base):
     worker_id: Mapped[uuid.UUID|None] = mapped_column(ForeignKey('workers.id'),index=True)
     device_id: Mapped[uuid.UUID|None] = mapped_column(ForeignKey('devices.id'),index=True)
     timezone: Mapped[str] = mapped_column(String(80),default='Europe/Moscow')
-    daily_limit: Mapped[int] = mapped_column(Integer,default=5)
+    daily_limit: Mapped[int] = mapped_column(Integer,default=3)
+    warmup_enabled: Mapped[bool] = mapped_column(Boolean,default=True,server_default=text('true'))
+    operational_started_at: Mapped[datetime|None] = mapped_column(DateTime(timezone=True))
     windows: Mapped[list] = mapped_column(JSONB,default=lambda:[{'start':'08:00','end':'20:00'}])
     min_interval_minutes: Mapped[int] = mapped_column(Integer,default=60)
     jitter_minutes: Mapped[int] = mapped_column(Integer,default=20)
@@ -85,6 +87,7 @@ class Account(Identity, Base):
     last_published_at: Mapped[datetime|None] = mapped_column(DateTime(timezone=True))
     extra: Mapped[dict] = mapped_column(JSONB,default=dict)
     __table_args__=(UniqueConstraint('platform','username'),
+        UniqueConstraint('id','platform',name='uq_account_platform_identity'),
         ForeignKeyConstraint(['device_id','worker_id'],['devices.id','devices.worker_id']),
         CheckConstraint('device_id IS NULL OR worker_id IS NOT NULL'),
         CheckConstraint("platform IN ('tiktok','instagram','youtube')"),
@@ -114,6 +117,7 @@ class SchedulePlan(Identity, Base):
     __table_args__=(UniqueConstraint('account_id','local_date'),)
 class Job(Identity, Base):
     __tablename__='jobs'
+    platform: Mapped[str] = mapped_column(String(20))
     clip_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('clips.id'),index=True)
     account_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('accounts.id'),index=True)
     plan_id: Mapped[uuid.UUID|None] = mapped_column(ForeignKey('schedule_plans.id'))
@@ -132,6 +136,8 @@ class Job(Identity, Base):
     result: Mapped[dict] = mapped_column(JSONB,default=dict)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),default=now,onupdate=now)
     __table_args__=(UniqueConstraint('account_id','clip_id',name='uq_no_repeat_clip_account'),
+        UniqueConstraint('clip_id','platform',name='uq_clip_platform_once'),
+        ForeignKeyConstraint(['account_id','platform'],['accounts.id','accounts.platform'],name='fk_job_account_platform'),
         UniqueConstraint('id','account_id','clip_id',name='uq_job_publication_identity'),
         UniqueConstraint('account_id','local_date','slot',name='uq_account_daily_slot'),
         CheckConstraint("status IN ('pending','scheduled','assigned','processing','published','failed','cancelled','retry_wait','unknown','paused')"),

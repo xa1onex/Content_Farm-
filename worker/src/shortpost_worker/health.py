@@ -1,6 +1,8 @@
 """Fresh per-device diagnostics; no proxy credentials are read or reported."""
 from datetime import datetime, timezone
 import ipaddress
+import http.client
+import io
 import os
 import re
 import shlex
@@ -22,10 +24,12 @@ def network(adb, expected):
         ipaddress.ip_address(expected)
         payload='GET /?shortpost='+os.urandom(8).hex()+' HTTP/1.1\r\nHost: api.ipify.org\r\nConnection: close\r\n\r\n'
         escaped=''.join('\\%03o'%v for v in payload.encode())
-        raw=adb.shell('sh','-c',"printf '"+escaped+"' | toybox nc -4 -w 8 -W 8 -q 8 api.ipify.org 80",timeout=15)
-        # adb text output normalizes CRLF on Windows.
-        body=re.split(r'\r?\n\r?\n',raw,maxsplit=1)[1].strip()
-        tcp=raw.startswith('HTTP/1.1 200 ') and body==expected
+        raw=adb.shell('sh','-c',"printf '"+escaped+"' | toybox nc -4 -w 8 -W 8 -q 8 api.ipify.org 80 | toybox od -An -v -tx1",timeout=15)
+        # Hex preserves HTTP bytes through Windows ADB (which can double CRLF).
+        class Socket:
+            def makefile(self,*args):return io.BytesIO(bytes.fromhex(raw))
+        response=http.client.HTTPResponse(Socket());response.begin()
+        tcp=response.status==200 and response.read(128).decode('ascii').strip()==expected
         # Binary STUN is transferred as hex, avoiding Windows text decoding loss.
         transaction=os.urandom(12);request=b'\x00\x01\x00\x00\x21\x12\xa4\x42'+transaction
         escaped=''.join('\\%03o'%v for v in request)

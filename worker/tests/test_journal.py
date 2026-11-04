@@ -55,3 +55,12 @@ def test_unknown_blocks_device_until_reconciliation(journal,assignment):
     journal.save_assignment(assignment);identifier=assignment['job']['id']
     journal.stage(identifier,1,'unknown');assert 'mumu-01' in journal.blocked_devices()
     journal.stage(identifier,1,'reconciled');assert not journal.blocked_devices()
+
+
+def test_acknowledged_safe_retry_does_not_block_device(journal,assignment):
+    journal.save_assignment(assignment)
+    identifier=assignment['job']['id'];attempt=assignment['job']['attempts']
+    journal.record_result(identifier,attempt,{'outcome':'safe_failure','no_publish_attempted':True})
+    journal.result_acknowledged(identifier,attempt,{'status':'retry_wait'})
+    assert not journal.blocked_devices()
+    assert journal.job(identifier,attempt)['stage']=='abandoned'

@@ -9,6 +9,12 @@ relations={'category_ids':(AccountCategory,'category_id'),'topic_ids':(AccountTo
            'format_ids':(AccountFormat,'format_id')}
 def account_record(s,a):
     result=record(a)
+    from app.scheduler.service import daily_quota,warmup_day
+    from app.db import now
+    from zoneinfo import ZoneInfo
+    day=now().astimezone(ZoneInfo(a.timezone)).date()
+    result['effective_daily_limit']=daily_quota(a,day)
+    result['warmup_day']=warmup_day(a,day)
     for name,(model,field) in relations.items():
         result[name]=list(s.scalars(select(getattr(model,field)).where(model.account_id==a.id)))
     return result

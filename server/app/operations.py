@@ -55,13 +55,22 @@ def overview(s):
     workers={w.id:w for w in s.scalars(select(Worker))}
     devices={d.id:d for d in s.scalars(select(Device))}
     accounts=[]
+    from app.scheduler.service import daily_quota,warmup_day
+    from zoneinfo import ZoneInfo
     for account in s.scalars(select(Account).where(Account.status!='deleted').order_by(Account.created_at)):
         reasons=account_blockers(account,workers.get(account.worker_id),devices.get(account.device_id))
         accounts.append({'id':str(account.id),'username':account.username,'platform':account.platform,
           'status':account.status,'daily_limit':account.daily_limit,'timezone':account.timezone,
+          'effective_daily_limit':daily_quota(account,now().astimezone(ZoneInfo(account.timezone)).date()),
+          'warmup_day':warmup_day(account,now().astimezone(ZoneInfo(account.timezone)).date()),
+          'operational_started_at':account.operational_started_at.isoformat() if account.operational_started_at else None,
           'ready':not reasons,'reasons':reasons,'device':devices[account.device_id].name if account.device_id in devices else None})
     counts={str(status):count for status,count in s.execute(select(Job.status,func.count()).group_by(Job.status))}
     ready=s.scalar(select(func.count()).select_from(Clip).where(Clip.status=='ready',Clip.verified_at.is_not(None)))
+    available={}
+    for platform in ('instagram','tiktok','youtube'):
+        reserved=select(Job.clip_id).where(Job.platform==platform)
+        available[platform]=s.scalar(select(func.count()).select_from(Clip).where(Clip.status=='ready',Clip.verified_at.is_not(None),Clip.platforms.contains([platform]),Clip.id.not_in(reserved)))
     farm=s.get(Setting,'farm_heartbeat')
     farm_data=dict(farm.value) if farm else {}
     farm_data['online']=fresh(farm_data.get('at'),180)
@@ -79,7 +88,7 @@ def overview(s):
         for code in account['reasons']:
             problems.append({'code':code,'account':account['username'],'message':LABELS[code]})
     return {'at':now().isoformat(),'farm':farm_data,'scheduler':scheduler_data,'ready_clips':ready,
-      'accounts':accounts,'workers':[{'id':str(w.id),'name':w.name,'online':bool(w.heartbeat_at and fresh(w.heartbeat_at.isoformat(),settings().heartbeat_timeout)),
+      'available_by_platform':available,'accounts':accounts,'workers':[{'id':str(w.id),'name':w.name,'online':bool(w.heartbeat_at and fresh(w.heartbeat_at.isoformat(),settings().heartbeat_timeout)),
         'running':bool(w.capabilities.get('runtime',{}).get('running'))} for w in workers.values()],
       'devices':[{'name':d.name,'external_id':d.external_id,'health':d.capabilities.get('health',{}),'fresh':fresh(d.capabilities.get('health',{}).get('at')),'network_fresh':fresh(d.capabilities.get('health',{}).get('network',{}).get('at'),180)} for d in devices.values()],
       'jobs':counts,'published_24h':s.scalar(select(func.count()).select_from(Publication).where(Publication.published_at>=now()-timedelta(hours=24))),

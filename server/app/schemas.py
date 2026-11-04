@@ -62,7 +62,8 @@ class AccountIn(Input):
     worker_id: UUID|None=None
     device_id: UUID|None=None
     timezone: str='Europe/Moscow'
-    daily_limit: int=Field(default=5,ge=0,le=50)
+    warmup_enabled: bool=True
+    daily_limit: int=Field(default=3,ge=0,le=50)
     windows: list[Window]=Field(default_factory=lambda:[Window(start='08:00',end='20:00')],min_length=1,max_length=10)
     min_interval_minutes: int=Field(default=60,ge=1,le=1440)
     jitter_minutes: int=Field(default=20,ge=0,le=120)
@@ -94,6 +95,7 @@ class AccountPatch(Input):
     worker_id: UUID|None=None
     device_id: UUID|None=None
     timezone: str|None=None
+    warmup_enabled: bool|None=None
     daily_limit: int|None=None
     windows: list[Window]|None=None
     min_interval_minutes: int|None=None

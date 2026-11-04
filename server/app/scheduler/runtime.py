@@ -22,6 +22,8 @@ def tick():
     with transaction() as s:
         lock(s,'scheduler_tick')
         expired=reap(s)
+        from app.scheduler.service import start_ready_accounts
+        start_ready_accounts(s)
         first=generate(s)
         # Plan next day per-account timezone, avoiding a single server timezone boundary.
         from zoneinfo import ZoneInfo

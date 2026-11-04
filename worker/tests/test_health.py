@@ -10,7 +10,7 @@ def test_missing_proxy_identity_cannot_report_success():
 
 
 def test_wrong_exit_is_rejected_even_if_tcp_works():
-    adb=Mock();adb.shell.side_effect=['HTTP/1.1 200 OK\n\n203.0.113.8','']
+    adb=Mock();adb.shell.side_effect=[(b'HTTP/1.1 200 OK\r\nContent-Length: 11\r\n\r\n203.0.113.8').hex(),'']
     assert not network(adb,'203.0.113.9')['ready']
 
 
@@ -23,3 +23,17 @@ def test_device_identity_failure_does_not_probe_network(config,monkeypatch):
     report=device_health(config,config.devices[0])
     assert report['online'] and not report['identity_verified']
     probe.assert_not_called()
+
+
+def test_tcp_and_udp_both_must_match_expected_exit(monkeypatch):
+    from shortpost_worker import health
+    transaction=b'x'*12
+    monkeypatch.setattr(health.os,'urandom',lambda n:transaction if n==12 else b'n'*n)
+    cookie=b'\x21\x12\xa4\x42'
+    address=bytes(a^b for a,b in zip(bytes([203,0,113,9]),cookie))
+    attribute=struct.pack('!HH',0x0020,8)+b'\x00\x01\x00\x00'+address
+    stun=b'\x01\x01'+struct.pack('!H',len(attribute))+cookie+transaction+attribute
+    http=b'HTTP/1.1 200 OK\r\nContent-Length: 11\r\n\r\n203.0.113.9'
+    adb=Mock();adb.shell.side_effect=[http.hex(),stun.hex()]
+    result=network(adb,'203.0.113.9')
+    assert result['ready'] and result['tcp_verified'] and result['udp_verified']

@@ -62,3 +62,18 @@ def test_daily_limit_and_minimum_interval(seeded):
         with pytest.raises(HTTPException):validate_slot(s,a,now()+timedelta(minutes=30))
         a.daily_limit=5;a.min_interval_minutes=60
         with pytest.raises(HTTPException):validate_slot(s,a,now()+timedelta(minutes=30))
+
+
+def test_warmup_first_day_schedules_one_remaining_slot_after_activation(seeded,monkeypatch):
+    from datetime import datetime,timezone
+    from app.scheduler import service
+    fixed=datetime(2026,11,4,17,0,tzinfo=timezone.utc)
+    monkeypatch.setattr(service,'now',lambda:fixed)
+    with transaction() as s:
+        a=s.get(Account,seeded['account']);a.warmup_enabled=True;a.daily_limit=3
+        a.operational_started_at=fixed;a.windows=[{'start':'08:00','end':'20:00'}]
+        s.execute(delete(Job));s.flush()
+        result=generate(s,fixed.date(),[a.id])
+        jobs=list(s.scalars(select(Job)))
+        assert result['created']==1
+        assert len(jobs)==1 and jobs[0].scheduled_at==fixed+timedelta(minutes=2)
