@@ -103,6 +103,23 @@ async def test_error_after_submit_is_unknown_and_never_resubmitted(config,journa
     finally:await api.close()
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('failure',[UIError('ui_selector_missing'),LeaseLost()])
+async def test_confirmation_timeout_or_lease_loss_never_resubmits(config,journal,assignment,monkeypatch,failure):
+    backend,api,engine,clicks=setup(config,journal,assignment,monkeypatch)
+    publisher=engine.publisher_factory()
+    def verification():raise failure
+    publisher.verify_publication=verification
+    try:
+        await engine.process(assignment)
+        assert clicks==['submit'] and backend.status=='unknown'
+        assert backend.results[0]['error_code']==failure.code
+        await engine.process(assignment)
+        await engine.recover()
+        assert clicks==['submit'] and len(backend.results)==1
+        assert 'mumu-01' in journal.blocked_devices()
+    finally:await api.close()
+
+@pytest.mark.asyncio
 async def test_crash_after_submit_recovers_without_ui(config,journal,assignment,monkeypatch):
     backend,api,engine,clicks=setup(config,journal,assignment,monkeypatch)
     backend.status='processing';journal.mark_irreversible(assignment['job']['id'],1)

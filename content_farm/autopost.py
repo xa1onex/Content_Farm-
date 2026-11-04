@@ -92,7 +92,7 @@ def register_job(job_dir):
             if existing is None:
                 payload = {'passport':clip['id'],'source_id':source['id'],
                     'drive_file_id':record['id'],'sha256':clip['sha256'],
-                    'title':clip.get('description') or clip['id'],
+                    'title':clip.get('description') or 'Интересный момент',
                     'description':clip.get('description',''),
                     'category_id':AUTOPOST_CATEGORY_ID,'format_id':AUTOPOST_FORMAT_ID,
                     'duration_seconds':clip['duration_seconds'],

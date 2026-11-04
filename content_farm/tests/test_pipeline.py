@@ -105,6 +105,22 @@ class GeminiTests(unittest.TestCase):
         self.assertEqual(client.models.generate_content.call_count,1)
 
 class BridgeTests(unittest.TestCase):
+    def test_missing_description_never_uses_internal_passport_as_public_title(self):
+        with tempfile.TemporaryDirectory() as d:
+            p=Path(d);code='CF-'+'A'*32;name=code+'.mp4';sha='a'*64
+            save_private_json(p/'state.json',{'id':'test-job','archived':True,'source':{'kind':'youtube','value':'https://youtube.com/example'},'drive_files':{name:{'id':'drive-file'}}})
+            save_private_json(p/'manifest.json',{'title':'Source','clips':[{'id':code,'file':name,'sha256':sha,'duration_seconds':20}]})
+            client=MagicMock()
+            client.get.side_effect=[{'items':[{'id':'source-1'}]},{'items':[]}]
+            client.post.return_value={'id':'clip-1','status':'ready','verified_at':'2026-01-01T00:00:00Z','passport':code,'sha256':sha,'drive_file_id':'drive-file'}
+            with patch.object(autopost,'AUTOPOST_ENABLED',True),patch.object(autopost,'AUTOPOST_CATEGORY_ID','category'),patch.object(autopost,'AUTOPOST_FORMAT_ID','format'),patch.object(autopost,'Client',return_value=client):
+                self.assertTrue(autopost.register_job(p)['registered'])
+            payload=client.post.call_args.args[1]
+            self.assertEqual(payload['passport'],code)
+            self.assertEqual(payload['title'],'Интересный момент')
+            self.assertEqual(payload['description'],'')
+            self.assertNotIn(code,payload['title']+payload['description'])
+
     def test_pending_request_replays_same_key_and_body_after_lost_response(self):
         with tempfile.TemporaryDirectory() as d:
             p=Path(d);tokens=p/'keys.json';save_private_json(tokens,{'farm_token':'test-only-token'})

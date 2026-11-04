@@ -60,7 +60,10 @@ class PlatformPublisher(abc.ABC):
         for step in steps:
             self.guard.check()
             if step.action=='back':self.driver.back();continue
-            element=self.find(step.locator,step.timeout_seconds)
+            try:element=self.find(step.locator,step.timeout_seconds)
+            except UIError as exc:
+                if step.optional and exc.code=='ui_selector_missing':continue
+                raise
             if step.action=='click':self.guard.check();element.click()
             elif step.action=='input':
                 self.guard.check();element.clear();self.guard.check();element.send_keys(self.context[step.source])
@@ -108,7 +111,7 @@ class PlatformPublisher(abc.ABC):
         element.click()  # Exactly one click. HTTP retries disabled in the Appium transport.
     def expected_publication_text(self):return self.context["caption"]
     def verify_publication(self):
-        self.find(self.profile.confirmation,30)
+        self.find(self.profile.confirmation,self.profile.confirmation_timeout_seconds)
         self.steps(self.profile.verification_steps)
         if normalize_user(self.text(self.profile.author_proof))!=normalize_user(self.assignment.account.username):raise UIError('publication_author_unverified')
         if self.text(self.profile.caption_proof).strip()!=self.expected_publication_text().strip():raise UIError('publication_content_unverified')

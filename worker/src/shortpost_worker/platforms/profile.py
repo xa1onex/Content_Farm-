@@ -13,10 +13,12 @@ class Step(Strict):
     locator:Locator|None=None
     source:Literal['caption','title','filename','media_album']|None=None
     timeout_seconds:int=Field(default=15,ge=1,le=30)
+    optional:bool=False
     @model_validator(mode='after')
     def fields(self):
         if self.action!='back' and not self.locator:raise ValueError('Step requires a locator')
         if self.action=='input' and not self.source:raise ValueError('Input step requires a source')
+        if self.optional and self.action!='click':raise ValueError('Only dialog clicks may be optional')
         return self
 class Profile(Strict):
     schema_version:Literal[1]=1
@@ -31,6 +33,7 @@ class Profile(Strict):
     metadata_steps:list[Step]=Field(min_length=1)
     submit:Locator
     confirmation:Locator
+    confirmation_timeout_seconds:int=Field(default=30,ge=1,le=1800)
     verification_steps:list[Step]=Field(default_factory=list)
     caption_proof:Locator
     author_proof:Locator

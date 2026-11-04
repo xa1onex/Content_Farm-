@@ -80,6 +80,11 @@
           "minimum": 1,
           "title": "Timeout Seconds",
           "type": "integer"
+        },
+        "optional": {
+          "default": false,
+          "title": "Optional",
+          "type": "boolean"
         }
       },
       "required": [
@@ -157,6 +162,13 @@
     },
     "confirmation": {
       "$ref": "#/$defs/Locator"
+    },
+    "confirmation_timeout_seconds": {
+      "default": 30,
+      "maximum": 1800,
+      "minimum": 1,
+      "title": "Confirmation Timeout Seconds",
+      "type": "integer"
     },
     "verification_steps": {
       "items": {

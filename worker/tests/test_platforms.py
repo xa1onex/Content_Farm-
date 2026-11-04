@@ -44,6 +44,76 @@ def test_submit_must_not_appear_in_replayable_flow():
     values=profile().model_dump();values['upload_steps']=[{'action':'click','locator':values['submit']}]
     with pytest.raises(ValidationError):Profile.model_validate(values)
 
+def test_optional_click_cannot_hide_submit_or_metadata_input():
+    values=profile().model_dump()
+    values['upload_steps']=[{'action':'click','locator':values['submit'],'optional':True}]
+    with pytest.raises(ValidationError):Profile.model_validate(values)
+    values=profile().model_dump();values['metadata_steps'][0]['optional']=True
+    with pytest.raises(ValidationError):Profile.model_validate(values)
+
+@pytest.mark.parametrize('failure,skipped',[
+    ('ui_selector_missing',True),('ambiguous_ui_selector',False),('login_required',False)])
+def test_optional_dialog_only_skips_absence(tmp_path,failure,skipped):
+    from shortpost_worker.platforms.profile import Step,Locator
+    publisher=InstagramPublisher(profile('instagram'),Mock(),Mock(),Mock(),tmp_path)
+    publisher.find=Mock(side_effect=UIError(failure))
+    step=Step(action='click',locator=Locator(by='id',value='start-new-video'),optional=True,timeout_seconds=2)
+    if skipped:publisher.steps([step])
+    else:
+        with pytest.raises(UIError,match=failure):publisher.steps([step])
+
+def test_optional_dialog_clicks_once_when_present_and_propagates_lease_loss(tmp_path):
+    from shortpost_worker.platforms.profile import Step,Locator
+    from shortpost_worker.errors import LeaseLost
+    publisher=InstagramPublisher(profile('instagram'),Mock(),Mock(),Mock(),tmp_path)
+    element=Mock();publisher.find=Mock(return_value=element)
+    step=Step(action='click',locator=Locator(by='id',value='start-new-video'),optional=True)
+    publisher.steps([step]);element.click.assert_called_once()
+    publisher.find.side_effect=LeaseLost()
+    with pytest.raises(LeaseLost):publisher.steps([step])
+    element.click.assert_called_once()
+
+def test_slow_confirmation_keeps_guard_checks_and_requires_post_proof(tmp_path,monkeypatch):
+    from shortpost_worker.platforms import base
+    clock=SimpleNamespace(now=0.)
+    monkeypatch.setattr(base.time,'monotonic',lambda:clock.now)
+    monkeypatch.setattr(base.time,'sleep',lambda seconds:setattr(clock,'now',clock.now+seconds))
+    values=profile('instagram').model_dump();values['confirmation_timeout_seconds']=120
+    driver=Mock();confirmed=Mock();confirmed.is_displayed.return_value=True
+    driver.find_elements.side_effect=lambda by,value:[confirmed] if clock.now>=45 else []
+    guard=Mock();publisher=InstagramPublisher(Profile.model_validate(values),driver,Mock(),guard,tmp_path)
+    publisher.assignment=SimpleNamespace(account=SimpleNamespace(username='example'))
+    publisher.context={'caption':'Описание ролика'}
+    proof={'author':'example','post-caption':'Описание ролика','link':'https://www.instagram.com/reel/ABC_123x/'}
+    publisher.text=lambda locator:proof[locator.value]
+    assert publisher.verify_publication()['external_id']=='ABC_123x'
+    assert clock.now==45 and guard.check.call_count>=180
+    proof['post-caption']='Другой ролик'
+    with pytest.raises(UIError,match='publication_content_unverified'):publisher.verify_publication()
+
+def test_confirmation_wait_stops_at_timeout_or_lease_loss(tmp_path,monkeypatch):
+    from shortpost_worker.platforms import base
+    from shortpost_worker.errors import LeaseLost
+    clock=SimpleNamespace(now=0.)
+    monkeypatch.setattr(base.time,'monotonic',lambda:clock.now)
+    monkeypatch.setattr(base.time,'sleep',lambda seconds:setattr(clock,'now',clock.now+seconds))
+    values=profile().model_dump();values['confirmation_timeout_seconds']=60
+    driver=Mock();driver.find_elements.return_value=[]
+    guard=Mock();publisher=TikTokPublisher(Profile.model_validate(values),driver,Mock(),guard,tmp_path)
+    with pytest.raises(UIError,match='ui_selector_missing'):publisher.verify_publication()
+    assert clock.now==60
+    clock.now=0
+    def check():
+        if clock.now>=2:raise LeaseLost()
+    guard.check.side_effect=check
+    with pytest.raises(LeaseLost):publisher.verify_publication()
+    assert clock.now==2
+
+@pytest.mark.parametrize('seconds',[0,1801])
+def test_confirmation_wait_is_bounded(seconds):
+    values=profile().model_dump();values['confirmation_timeout_seconds']=seconds
+    with pytest.raises(ValidationError):Profile.model_validate(values)
+
 def test_submit_journal_is_written_before_click(tmp_path):
     order=[];element=Mock();element.click.side_effect=lambda:order.append('click')
     guard=Mock();driver=Mock();publisher=TikTokPublisher(profile(),driver,Mock(),guard,tmp_path)

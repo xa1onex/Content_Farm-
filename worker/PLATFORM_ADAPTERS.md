@@ -8,7 +8,7 @@
 2. При остановленном Worker запустите `inspect-ui --external-id mumu-01` или `record-locator --external-id mumu-01 --output selector.local.json`. Запись locator **ничего не нажимает**.
 3. Заполните account_steps и account locator, который возвращает настоящий handle, не display name. Адаптер сравнивает его с assignment.account.username. UI ambiguous/missing → остановка.
 4. Запишите upload_steps: native create/upload/picker и точный файл `{filename}`. Worker помещает видео в отдельную папку `/sdcard/Movies/ShortPost/<job_uuid>/<job_uuid>.mp4`. Если приложение скрывает имена файлов, выберите альбом `{media_album}` (UUID задания) и единственную миниатюру внутри него. Несколько совпадений останавливают навигацию. metadata_steps используют source=caption/title/filename/media_album. Для picker не используйте случайный первый thumbnail из общих «Недавних».
-5. submit — отдельный финальный selector. Его нельзя повторно включить как click в account/upload/metadata/verification/metrics/parameter flows; валидация профиля это запрещает.
+5. submit — отдельный финальный selector. Его нельзя повторно включить как click в account/upload/metadata/verification/metrics/parameter flows; валидация профиля это запрещает. Для известного диалога, который появляется не всегда, можно задать click с `optional=true` и коротким `timeout_seconds`. Например, «Начать новое видео» в диалоге старого черновика. Пропускается только отсутствие этого элемента; неоднозначный selector, потеря соединения, истечение аренды и ошибки платформы останавливают работу. Выбор аккаунта, файла и проверка результата остаются обязательными.
 6. confirmation и verification_steps должны приводить к **именно новому** опубликованному ролику. caption_proof/author_proof проверяют содержимое и аккаунт. Для YouTube проверяется title; для TikTok/Instagram caption. published_url возвращает настоящую ссылку; альтернативно url_source=clipboard после контролируемого Copy link. Старый известный URL/clipboard запрещён как доказательство новой публикации.
 7. errors содержит известные селекторы captcha/platform_block/login_required. Появление этих элементов вызывает остановку и код операторского вмешательства. Неизвестный UI не нажимается наугад.
 8. max_duration_seconds, max_caption_chars и max_title_chars задаются под реально проверенную версию/тип публикации. Worker не угадывает меняющиеся лимиты приложений.
@@ -25,6 +25,11 @@ JSON schema: `profiles/schema.json`. Все параметры профиля т
 
 ## Параметры публикации
 
+Публичные подписи и заголовки содержат только описание контента. Служебные
+паспорта роликов, UUID заданий, SHA-256 и имена файлов не добавляются в подпись,
+заголовок или кадр. Для учёта и защиты от повторов используются внутренние
+метаданные и настоящая ссылка публикации, а не видимый зрителям ID.
+
 - TikTok: caption, visibility public/friends/private, allow_comments boolean.
 - Instagram: caption, allow_comments boolean.
 - YouTube: title, caption/description, **обязательные** visibility public/unlisted/private и made_for_kids boolean.
@@ -34,6 +39,8 @@ JSON schema: `profiles/schema.json`. Все параметры профиля т
 ## Подтверждение и аналитика
 
 Успех — не факт нажатия. Нужны confirmation, proof автора/текста и настоящий platform URL. TikTok извлекает numeric video ID и сверяет handle в URL; Instagram — Reel shortcode; YouTube — настоящий 11-символьный video ID. Случайный UUID не принимается. Неоднозначный результат после Submit — unknown, новая попытка Submit запрещена.
+
+`confirmation_timeout_seconds` задаёт ожидание confirmation: по умолчанию 30 секунд, максимум 1800. Для медленной загрузки Instagram настройте его по результатам проверки на ПК. Во время ожидания Worker продолжает продлевать аренду задания и проверяет её перед каждым опросом UI; общий `max_processing_seconds` также ограничивает работу. Истечение времени или потеря аренды после Submit дают unknown, повторного нажатия не происходит. Исчезновение полосы загрузки само по себе не доказывает публикацию: по-прежнему нужны автор, текст и ссылка нового ролика.
 
 metrics_steps возвращаются к конкретному URL, metric_post_proof проверяет внешний ID. Доступные selectors метрик читают точные целые значения; сокращённые/неоднозначные `1.2K`, `1,2 тыс.` не превращаются в придуманные числа. Retention принимается как видимый точный процент; недоступные значения не отправляются. Без настроенных metrics selectors Worker сообщает metrics_unavailable и повторяет измерение позже, не отправляя нули.
 
