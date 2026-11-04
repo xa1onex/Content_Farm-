@@ -13,16 +13,16 @@ Windows 10/11 x64, Python 3.12+, Git, Node.js LTS, Java JDK, Android SDK Platfor
 ```powershell
 git clone https://github.com/xa1onex/Content_Farm-.git
 cd Content_Farm-
-powershell -NoProfile -File .\scripts\setup-windows.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup-windows.ps1
 ```
 
-Скрипт проверяет Python, создаёт `.venv-worker`, устанавливает зафиксированные зависимости и CLI, ограничивает ACL только собственного `%LOCALAPPDATA%\ShortPost` текущим пользователем и SYSTEM. Не меняет чужие каталоги или системные установки. Если PowerShell запрещает запуск локальных скриптов, для текущего окна: `Set-ExecutionPolicy -Scope Process RemoteSigned`.
+Скрипт проверяет Python, создаёт `.venv-worker`, устанавливает зафиксированные зависимости и CLI, ограничивает ACL только собственного `%LOCALAPPDATA%\ShortPost` текущим пользователем и SYSTEM. Не меняет чужие каталоги или системные установки. В командах ниже `-ExecutionPolicy Bypass` разрешает проверенный скрипт только в запускаемом процессе PowerShell. Постоянная политика Windows не меняется.
 
 Опциональный Appium устанавливается в `worker/tools/node_modules`, драйвер — в отдельный `%LOCALAPPDATA%\ShortPost\appium`:
 
 ```powershell
-powershell -NoProfile -File .\scripts\setup-windows.ps1 -InstallAppium
-powershell -NoProfile -File .\scripts\start-appium.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup-windows.ps1 -InstallAppium
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-appium.ps1
 ```
 
 Если Appium 2 уже работает на loopback, используйте его и не выполняйте `-InstallAppium`. Проверьте `doctor` и `appium driver doctor uiautomator2` для выбранного APPIUM_HOME. Разные Appium sessions используют разные systemPort.
@@ -52,7 +52,7 @@ python server/scripts/provision_worker.py --name Windows-PC --max-parallel 1 \
 
 ## 4. Одно устройство
 
-Запустите один MuMu вручную, включите его ADB и определите реальный loopback endpoint через MuMu Manager/настройки. Не угадывайте диапазоны портов.
+Запустите один MuMu вручную, включите его ADB и определите реальный loopback endpoint через MuMu Manager/настройки. Не угадывайте диапазоны портов. После перезапуска MuMu или ПК заново подключите известный endpoint: `adb connect 127.0.0.1:ACTUAL_PORT`, затем проверьте `adb devices`. Перед диагностикой Appium ожидается строка с этим endpoint и состоянием `device`.
 
 ```powershell
 .\.venv-worker\Scripts\shortpost-worker.exe emulators
@@ -66,13 +66,13 @@ python server/scripts/provision_worker.py --name Windows-PC --max-parallel 1 \
 ## 5. Запуск
 
 ```powershell
-powershell -NoProfile -File .\scripts\start-worker.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-worker.ps1
 ```
 
 Это соединение, heartbeat, recovery и аналитика без новых публикаций. Когда владелец разрешает реальную проверку, выставьте `allow_publish=true` и явно запустите:
 
 ```powershell
-powershell -NoProfile -File .\scripts\start-worker.ps1 -Live
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-worker.ps1 -Live
 ```
 
 Live preflight требует настроенных и navigation-verified профилей. Это разрешает настоящие публикации из серверной очереди; сначала оставьте один согласованный аккаунт и одно задание. Перед этим Drive и сам серверный аккаунт должны быть действительно настроены. Ни установка, ни тесты в репозитории не дают разрешения публиковать автоматически.
@@ -82,7 +82,7 @@ Live preflight требует настроенных и navigation-verified пр
 `status`, `pause`, `resume`, `stop` вызываются отдельным CLI. `pause` прекращает новые назначения, активные попытки сохраняют lease. `stop` ждёт завершения активных операций. Не удаляйте journal для устранения unknown.
 
 ```powershell
-powershell -NoProfile -File .\scripts\install-autostart.ps1 -IncludeAppium
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-autostart.ps1 -IncludeAppium
 ```
 
 Создаются задачи Task Scheduler для текущего интерактивного пользователя при входе, не Windows Service. По умолчанию новые публикации выключены. Параметр `-Live` нужен отдельно, если владелец разрешает постоянное выполнение. Уже существующие задачи скрипт не перезаписывает. Appium должен успеть запуститься; при недоступности Worker завершает попытку до публикации безопасно и сообщает ошибку.
