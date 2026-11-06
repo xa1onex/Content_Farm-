@@ -23,3 +23,15 @@ def test_failed_media_index_prevents_opening_upload(tmp_path,monkeypatch):
     a.shell=lambda *args,**kw:'5' if args[0]=='stat' else 'No result found.'
     ticks=iter([0,31]);monkeypatch.setattr('shortpost_worker.devices.time.monotonic',lambda:next(ticks))
     with pytest.raises(WorkerError,match='android_media_not_indexed'):a.stage_media(video,str(uuid.uuid4()),SimpleNamespace(check=lambda:None))
+
+def test_mumu15_cli_crash_still_requires_exact_indexed_row(tmp_path):
+    video=tmp_path/'test.mp4';video.write_bytes(b'video');identifier=str(uuid.uuid4());a=ADB('adb','device');a.run=Mock(return_value='');calls=[]
+    def shell(*args,**kw):
+        calls.append(args)
+        if args[0]=='stat':return '5'
+        if args[:2]==('content','query'):raise WorkerError('device_command_failed')
+        if args[:2]==('sh','-c'):return 'Row: 0 _display_name='+identifier+'.mp4, duration=10000\n'
+        return ''
+    a.shell=shell
+    assert a.stage_media(video,identifier,SimpleNamespace(check=lambda:None)).endswith(identifier+'.mp4')
+    assert any(args[:2]==('sh','-c') for args in calls)

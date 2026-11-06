@@ -98,8 +98,13 @@ class ADB:
         deadline=time.monotonic()+30
         while True:
             guard.check()
-            indexed=self.shell('content','query','--uri','content://media/external/video/media',
+            query=('content','query','--uri','content://media/external/video/media',
                 '--projection','_display_name:duration','--where',"_display_name='"+filename+"'")
+            try:indexed=self.shell(*query)
+            except WorkerError:
+                # MuMu Android 15 can print a valid row, then crash its content CLI.
+                # Ignore only that CLI exit status; the exact UUID and duration below remain mandatory.
+                indexed=self.shell('sh','-c',' '.join(shlex.quote(v) for v in query)+'; true')
             if '_display_name='+filename in indexed and re.search(r'duration=[1-9][0-9]*',indexed):break
             if time.monotonic()>deadline:raise WorkerError('android_media_not_indexed')
             time.sleep(.5)
