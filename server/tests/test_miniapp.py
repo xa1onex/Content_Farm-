@@ -102,3 +102,31 @@ def test_dashboard_cannot_restart_uncertain_publication(client,seeded,telegram_c
     r=client.post('/api/v1/jobs/'+str(seeded['job'])+'/action',headers={'Authorization':'Bearer '+token,'Idempotency-Key':'unknown-never-retry'},json={'action':'pause','reason':'Пауза через панель'})
     assert r.status_code==409
     with transaction() as s:assert s.get(Job,seeded['job']).status=='unknown'
+
+def test_private_video_preview_requires_login_and_streams_only_media(client,seeded,telegram_config,monkeypatch):
+    from app.integrations import drive
+    calls=[]
+    def download(file_id,max_bytes):
+        calls.append((file_id,max_bytes));return {'mimeType':'video/mp4','size':'12'},iter([b'test-preview'])
+    monkeypatch.setattr(drive,'download',download)
+    path='/api/v1/miniapp/content/'+str(seeded['clip'])+'/preview'
+    assert client.get(path).status_code==401 and not calls
+    token=login(client).json()['token']
+    r=client.get(path,headers={'Authorization':'Bearer '+token})
+    assert r.status_code==200 and r.content==b'test-preview'
+    assert r.headers['content-type']=='video/mp4'
+    assert r.headers['cache-control']=='no-store'
+    assert calls==[('drive-file-one',128*1024**2)]
+
+def test_preview_limit_closes_google_connection_before_downloading(client,seeded,monkeypatch):
+    from app.integrations import drive
+    class FakeSession:
+        closed=False
+        def close(self):self.closed=True
+        def get(self,*args,**kwargs):raise AssertionError('Oversized media must not be requested')
+    fake=FakeSession()
+    monkeypatch.setattr(drive,'session',lambda:fake)
+    monkeypatch.setattr(drive,'get_info',lambda *args:{'size':str(129*1024**2),'mimeType':'video/mp4'})
+    r=client.get('/api/v1/miniapp/content/'+str(seeded['clip'])+'/preview',headers=auth())
+    assert r.status_code==503 and r.json()['detail']=='preview_too_large'
+    assert fake.closed

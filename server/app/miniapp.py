@@ -3,7 +3,7 @@ from datetime import datetime,timezone
 from pathlib import Path
 from urllib.parse import urlsplit,quote
 from fastapi import APIRouter,Depends,HTTPException,Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse,StreamingResponse
 from pydantic import BaseModel,Field
 from sqlalchemy import select
 from app.db import db_session,now
@@ -25,6 +25,18 @@ def shell():return FileResponse(assets/'index.html',headers={'Cache-Control':'no
 def asset(name:str):
     if name not in ('app.js','style.css'):raise HTTPException(404)
     return FileResponse(assets/name,headers={'Cache-Control':'no-cache'})
+
+@router.get('/api/v1/miniapp/content/{clip_id}/preview')
+def preview(clip_id:uuid.UUID,s=DB,actor=ADMIN):
+    from app.errors import require
+    from app.integrations import drive
+    clip=require(s,Clip,clip_id)
+    info,chunks=drive.download(clip.drive_file_id,max_bytes=128*1024**2)
+    # The page fetches with its Authorization header and creates a local video URL.
+    # No admin session, Google credential or public Drive sharing is put in a URL.
+    return StreamingResponse(chunks,media_type=info['mimeType'],headers={
+        'Content-Length':str(info['size']),'Cache-Control':'no-store',
+        'X-Content-Type-Options':'nosniff','Content-Disposition':'inline'})
 
 class InitData(BaseModel):
     init_data:str=Field(min_length=1,max_length=12000)

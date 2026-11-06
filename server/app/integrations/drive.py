@@ -42,10 +42,11 @@ def get_info(client,file_id):
 def metadata(file_id):
     with session() as client:return get_info(client,file_id)
 
-def download(file_id):
+def download(file_id,max_bytes=2*1024**3):
     client=session()
     try:
         info=get_info(client,file_id)
+        if int(info['size'])>max_bytes:raise DriveError('preview_too_large')
         response=client.get(f'https://www.googleapis.com/drive/v3/files/{file_id}',
             params={'alt':'media','supportsAllDrives':'true'},stream=True,timeout=(10,30))
         if response.status_code!=200:raise DriveError('drive_download_failed')
@@ -59,7 +60,7 @@ def download(file_id):
             for chunk in response.iter_content(256*1024):
                 if chunk:
                     total+=len(chunk)
-                    if total>2*1024**3:raise DriveError('drive_invalid_size')
+                    if total>max_bytes:raise DriveError('drive_invalid_size')
                     yield chunk
             if total!=int(info['size']):raise DriveError('drive_truncated_download')
         finally:
