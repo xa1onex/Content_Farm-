@@ -14,7 +14,7 @@ def test_adb_version_parser_uses_actual_package_output():
 def test_staged_jobs_have_separate_gallery_albums(tmp_path):
     video=tmp_path/'clip.mp4';video.write_bytes(b'video')
     adb=ADB('adb','device');adb.run=Mock()
-    adb.shell=Mock(side_effect=lambda *args,**kwargs:'5' if args[0]=='stat' else '')
+    adb.shell=Mock(side_effect=lambda *args,**kwargs:'5' if args[0]=='stat' else '_display_name='+args[-1].split("'")[1]+', duration=10000' if args[:2]==('content','query') else '')
     first='00000000-0000-4000-8000-000000000001'
     second='00000000-0000-4000-8000-000000000002'
     a=adb.stage_media(video,first,Mock());b=adb.stage_media(video,second,Mock())

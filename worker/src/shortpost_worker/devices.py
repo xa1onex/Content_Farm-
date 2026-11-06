@@ -90,6 +90,19 @@ class ADB:
         size=self.shell('stat','-c','%s',destination)
         if int(size)!=Path(local_path).stat().st_size:raise WorkerError('android_media_size_mismatch')
         self.shell('am','broadcast','-a','android.intent.action.MEDIA_SCANNER_SCAN_FILE','-d','file://'+destination)
+        # MuMu Android 12 acknowledges the broadcast without indexing the file.
+        # Ask the provider directly, then prove this exact UUID reached the video index.
+        canonical='/storage/emulated/0/'+destination.removeprefix('/sdcard/')
+        try:self.shell('content','call','--uri','content://media','--method','scan_file','--arg',canonical)
+        except WorkerError:pass  # Older providers can still complete the broadcast asynchronously.
+        deadline=time.monotonic()+30
+        while True:
+            guard.check()
+            indexed=self.shell('content','query','--uri','content://media/external/video/media',
+                '--projection','_display_name:duration','--where',"_display_name='"+filename+"'")
+            if '_display_name='+filename in indexed and re.search(r'duration=[1-9][0-9]*',indexed):break
+            if time.monotonic()>deadline:raise WorkerError('android_media_not_indexed')
+            time.sleep(.5)
         return destination
     def remove_media(self,path):
         nested=re.fullmatch(r'/sdcard/Movies/ShortPost/([a-f0-9-]{36})/\1\.mp4',path)
