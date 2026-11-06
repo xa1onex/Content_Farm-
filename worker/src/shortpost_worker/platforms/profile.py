@@ -58,7 +58,7 @@ class Profile(Strict):
             if step.action=='click' and step.locator and step.locator.by==self.submit.by and step.locator.value==self.submit.value:
                 raise ValueError('Submit must not occur in a replayable flow')
         if self.instagram_reels_452:
-            if (self.platform,self.package,self.app_version,self.locale.replace('_','-').lower())!=('instagram','com.instagram.android','452.0.0.0.43','ru-ru'):
+            if (self.platform,self.package,self.locale.replace('_','-').lower())!=('instagram','com.instagram.android','ru-ru') or self.app_version not in ('451.0.0.53.80','452.0.0.0.43','454.0.0.54.77','455.0.0.0.61'):
                 raise ValueError('Instagram Reels adapter requires the calibrated version and locale')
         if not self.navigation_only and not self.instagram_reels_452:
             if not all((self.confirmation,self.caption_proof,self.author_proof)):raise ValueError('Publication proof locators required')

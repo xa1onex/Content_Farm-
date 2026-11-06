@@ -18,6 +18,8 @@ def warmup_day(account, day):
     return max(1,(day-started.astimezone(ZoneInfo(account.timezone)).date()).days+1)
 
 def daily_quota(account,day):
+    override=(getattr(account,'extra',None) or {}).get('daily_overrides',{}).get(day.isoformat())
+    if isinstance(override,int) and 0<=override<=account.daily_limit:return override
     if not getattr(account,'warmup_enabled',False):return account.daily_limit
     age=warmup_day(account,day) or 1
     return min(account.daily_limit,1 if age<=2 else 2 if age==3 else 3)

@@ -188,6 +188,8 @@ def next_device(s=DB,actor=WORKER):
     from app.scheduler.service import enforce_execution_limits,compatible
     from zoneinfo import ZoneInfo
     for job,device in s.execute(q):
+        from app.campaigns import release_ready
+        if not release_ready(s,job):continue
         account=s.get(Account,job.account_id)
         if job.local_date!=now().astimezone(ZoneInfo(account.timezone)).date():continue
         if compatible(s,account,s.get(Clip,job.clip_id)) and enforce_execution_limits(s,account,job):
@@ -269,6 +271,7 @@ def job_action(job_id:UUID,data:JobAction,request:Request,s=DB,actor=ADMIN):
     elif data.action=='cancel':job.status='cancelled'
     elif data.action=='pause':job.status='paused'
     elif data.action in ('retry','reschedule'):
+        if job.result.get('no_republish'):raise HTTPException(409,'Uncertain historical publication is permanently quarantined; retry forbidden')
         from app.content.moderation import require_allowed
         require_allowed(s,job.clip_id)
         if job.status=='failed' and not job.result.get('no_publish_attempted') and not job.result.get('operator_verified'):

@@ -35,6 +35,8 @@ def claim(s,worker_id,job_id=None):
     candidates=list(s.scalars(q.limit(100)))
     job=None
     for candidate in candidates:
+        from app.campaigns import release_ready
+        if not release_ready(s,candidate):continue
         account=require(s,Account,candidate.account_id,locked=True)
         device=s.scalar(select(Device).where(Device.id==account.device_id).with_for_update(skip_locked=True))
         if not device:continue

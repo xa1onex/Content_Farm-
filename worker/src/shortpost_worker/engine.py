@@ -180,7 +180,7 @@ class Engine:
                 else:self.journal.stage(row['job_id'],row['attempt'],'published')
                 continue
             if status in ('failed','cancelled','paused'):
-                if row['irreversible_at'] is None or remote.get('result',{}).get('operator_verified'):
+                if row['irreversible_at'] is None or remote.get('result',{}).get('operator_verified') or remote.get('result',{}).get('no_republish'):
                     self.journal.stage(row['job_id'],row['attempt'],'reconciled')
                 continue
             if remote.get('attempts')!=row['attempt']:
