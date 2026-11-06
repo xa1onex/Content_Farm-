@@ -36,6 +36,8 @@ from app.miniapp import router as miniapp_router
 app.include_router(miniapp_router)
 from app.editorial import router as editorial_router
 app.include_router(editorial_router)
+from app.review import router as review_router
+app.include_router(review_router)
 
 @app.middleware('http')
 async def request_context(request:Request,call_next):

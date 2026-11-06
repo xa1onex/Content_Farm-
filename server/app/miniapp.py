@@ -67,8 +67,10 @@ def state(s=DB,actor=ADMIN):
     data['account_details']=[account_record(s,a) for a in accounts]
     from app.content.moderation import rejected
     rejected_ids=set(s.scalars(select(Clip.id).where(rejected())))
+    policy=s.get(Setting,'review_policy');review_required=bool(policy and policy.value.get('enabled'))
+    approvals={v.key.split(':',1)[1] for v in s.scalars(select(Setting).where(Setting.key.like('review_approved:%')))}
     data['content']=[{'id':str(c.id),'title':c.title,'description':c.description,'drive_url':'https://drive.google.com/file/d/'+quote(c.drive_file_id,safe='')+'/view','duration_seconds':c.duration_seconds,'status':c.status,'rejected':c.id in rejected_ids,
-        'platforms':{p:('used' if (c.id,p) in uses else 'rejected' if c.id in rejected_ids else 'reserved' if (c.id,p) in reserved else 'available' if c.status=='ready' and p in c.platforms else 'unavailable') for p in ('instagram','tiktok','youtube')}} for c in clips]
+        'platforms':{p:('used' if (c.id,p) in uses else 'rejected' if c.id in rejected_ids else 'review_pending' if review_required and str(c.id) not in approvals else 'reserved' if (c.id,p) in reserved else 'available' if c.status=='ready' and p in c.platforms else 'unavailable') for p in ('instagram','tiktok','youtube')}} for c in clips]
     data['queue']=[{'id':str(j.id),'title':titles.get(j.clip_id,'Ролик'),'account':users[j.account_id].username if j.account_id in users else 'Архивный аккаунт',
         'platform':j.platform,'status':j.status,'scheduled_at':j.scheduled_at,'attempts':j.attempts,'clip_id':str(j.clip_id),'account_id':str(j.account_id),'error_code':str((j.result or {}).get('error_code',''))[:100]} for j in jobs]
     data['publications']=[{'url':p.url,'title':titles.get(p.clip_id,'Ролик'),'account':users[p.account_id].username if p.account_id in users else 'Архивный аккаунт','published_at':p.published_at} for p in pubs]
