@@ -1,7 +1,7 @@
 import json,time,uuid
 from datetime import datetime,timezone
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit,quote
 from fastapi import APIRouter,Depends,HTTPException,Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel,Field
@@ -53,10 +53,10 @@ def state(s=DB,actor=ADMIN):
     uses={(u.clip_id,u.platform) for u in s.scalars(select(ClipPlatformUse))}
     reserved={(j.clip_id,j.platform) for j in s.scalars(select(Job))}
     data['account_details']=[account_record(s,a) for a in accounts]
-    data['content']=[{'id':str(c.id),'title':c.title,'duration_seconds':c.duration_seconds,'status':c.status,
+    data['content']=[{'id':str(c.id),'title':c.title,'description':c.description,'drive_url':'https://drive.google.com/file/d/'+quote(c.drive_file_id,safe='')+'/view','duration_seconds':c.duration_seconds,'status':c.status,
         'platforms':{p:('used' if (c.id,p) in uses else 'reserved' if (c.id,p) in reserved else 'available' if c.status=='ready' and p in c.platforms else 'unavailable') for p in ('instagram','tiktok','youtube')}} for c in clips]
     data['queue']=[{'id':str(j.id),'title':titles.get(j.clip_id,'Ролик'),'account':users[j.account_id].username if j.account_id in users else 'Архивный аккаунт',
-        'platform':j.platform,'status':j.status,'scheduled_at':j.scheduled_at,'attempts':j.attempts} for j in jobs]
+        'platform':j.platform,'status':j.status,'scheduled_at':j.scheduled_at,'attempts':j.attempts,'clip_id':str(j.clip_id),'account_id':str(j.account_id),'error_code':str((j.result or {}).get('error_code',''))[:100]} for j in jobs]
     data['publications']=[{'url':p.url,'title':titles.get(p.clip_id,'Ролик'),'account':users[p.account_id].username if p.account_id in users else 'Архивный аккаунт','published_at':p.published_at} for p in pubs]
     data['device_options']=[{'id':str(d.id),'name':d.name,'worker_id':str(d.worker_id)} for d in s.scalars(select(Device).where(Device.enabled))]
     data['events']=[{'kind':e.kind,'at':e.created_at,'severity':e.level} for e in s.scalars(select(Event).order_by(Event.created_at.desc()).limit(30))]

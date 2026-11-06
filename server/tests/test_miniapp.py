@@ -66,3 +66,39 @@ def test_forged_session_still_consumes_rate_limit(client,telegram_config,monkeyp
     assert client.get('/api/v1/miniapp/state',headers=headers).status_code==401
     assert client.get('/api/v1/miniapp/state',headers=headers).status_code==401
     assert client.get('/api/v1/miniapp/state',headers=headers).status_code==429
+
+def test_management_snapshot_contains_text_and_safe_drive_link(client,seeded):
+    from app.models import Clip,Job
+    with transaction() as s:
+        s.get(Clip,seeded['clip']).description='Текст будущей публикации'
+        s.add(Clip(passport='ENTERTAINMENT-REACTION-000002',drive_file_id='file/with?query',title='Encoded Drive ID',category_id=seeded['category'],format_id=seeded['format'],duration_seconds=12))
+        s.get(Job,seeded['job']).result={'error_code':'publication_not_confirmed','private_detail':'never-return-this'}
+    data=client.get('/api/v1/miniapp/state',headers=auth()).json()
+    clip=next(x for x in data['content'] if x['id']==str(seeded['clip']))
+    assert clip['description']=='Текст будущей публикации'
+    assert clip['drive_url']=='https://drive.google.com/file/d/drive-file-one/view'
+    assert next(x for x in data['content'] if x['title']=='Encoded Drive ID')['drive_url']=='https://drive.google.com/file/d/file%2Fwith%3Fquery/view'
+    job=next(x for x in data['queue'] if x['id']==str(seeded['job']))
+    assert job['clip_id']==str(seeded['clip']) and job['account_id']==str(seeded['account'])
+    assert job['error_code']=='publication_not_confirmed' and 'never-return-this' not in str(data)
+
+def test_signed_dashboard_can_edit_text_pause_and_move_job(client,seeded,telegram_config):
+    from datetime import datetime,timedelta,timezone
+    token=login(client).json()['token']
+    def headers():return {'Authorization':'Bearer '+token,'Idempotency-Key':__import__('uuid').uuid4().hex}
+    r=client.patch('/api/v1/content/'+str(seeded['clip']),headers=headers(),json={'title':'Новое название','description':'Описание без ID'})
+    assert r.status_code==200 and r.json()['description']=='Описание без ID'
+    path='/api/v1/jobs/'+str(seeded['job'])+'/action'
+    r=client.post(path,headers=headers(),json={'action':'pause','reason':'Пауза через панель'})
+    assert r.status_code==200 and r.json()['status']=='paused'
+    when=(datetime.now(timezone.utc)+timedelta(days=1)).replace(hour=12,minute=0,second=0,microsecond=0)
+    r=client.post(path,headers=headers(),json={'action':'reschedule','reason':'Перенос через панель','scheduled_at':when.isoformat()})
+    assert r.status_code==200 and r.json()['status']=='scheduled'
+
+def test_dashboard_cannot_restart_uncertain_publication(client,seeded,telegram_config):
+    from app.models import Job
+    with transaction() as s:s.get(Job,seeded['job']).status='unknown'
+    token=login(client).json()['token']
+    r=client.post('/api/v1/jobs/'+str(seeded['job'])+'/action',headers={'Authorization':'Bearer '+token,'Idempotency-Key':'unknown-never-retry'},json={'action':'pause','reason':'Пауза через панель'})
+    assert r.status_code==409
+    with transaction() as s:assert s.get(Job,seeded['job']).status=='unknown'
