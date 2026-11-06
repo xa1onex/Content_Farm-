@@ -8,7 +8,7 @@ from app.config import settings
 from app.errors import event
 
 LABELS = {
- 'worker_offline': 'Нет связи с ПК', 'device_offline': 'Эмулятор недоступен',
+ 'worker_offline': 'Нет связи с ПК', 'device_offline': 'Эмулятор недоступен', 'device_standby':'Ожидает своей очереди запуска',
  'identity_mismatch': 'Идентификатор эмулятора не совпадает с привязкой',
  'identity_unverified': 'Личность эмулятора пока не проверена',
  'proxy_unavailable': 'Прокси не прошёл проверку', 'proxy_unverified': 'Нет свежей проверки прокси',
@@ -42,7 +42,7 @@ def account_blockers(account, worker, device):
     if runtime.get('paused'): reasons.append('worker_paused')
     if not device.enabled: reasons.append('device_disabled')
     health=device.capabilities.get('health', {})
-    if not fresh(health.get('at')) or not health.get('online'): reasons.append('device_offline')
+    if not fresh(health.get('at')) or not health.get('online'): reasons.append('device_standby' if runtime.get('sequential_emulators') else 'device_offline')
     elif not health.get('identity_verified'): reasons.append('identity_mismatch' if health.get('identity_checked') else 'identity_unverified')
     profiles=health.get('profiles', {})
     if account.platform not in profiles: reasons.append('profile_missing')
@@ -121,7 +121,7 @@ def incident_key(problem):
     return problem['code']+':'+problem.get('account','system')
 
 SETUP_CODES={'account_paused','publishing_disabled','worker_not_running','profile_missing',
-    'profile_unverified','scheduler_paused','proxy_unverified','identity_unverified','worker_paused','device_disabled'}
+    'profile_unverified','scheduler_paused','proxy_unverified','identity_unverified','worker_paused','device_disabled','device_standby'}
 
 def alertable_problems(snapshot):
     # A deliberately paused account/worker and cold serial devices are setup state.

@@ -142,15 +142,22 @@ class Devices:
                     if time.monotonic()>deadline:raise WorkerError('mumu_boot_timeout')
                     time.sleep(2)
         if not endpoint:raise WorkerError('adb_endpoint_not_configured')
+        try:command([self.config.adb_path,'disconnect',endpoint])
+        except WorkerError:pass
         command([self.config.adb_path,'connect',endpoint])
         adb=ADB(self.config.adb_path,endpoint)
-        deadline=time.monotonic()+60
+        deadline=time.monotonic()+60;reconnect_at=time.monotonic()+5
         while True:
             if guard:guard.check()
             try:
                 if adb.run('get-state')=='device' and adb.shell('getprop','sys.boot_completed')=='1':break
             except WorkerError:pass
             if time.monotonic()>deadline:raise WorkerError('adb_connect_timeout')
+            if time.monotonic()>=reconnect_at:
+                try:
+                    command([self.config.adb_path,'disconnect',endpoint]);command([self.config.adb_path,'connect',endpoint])
+                except WorkerError:pass
+                reconnect_at=time.monotonic()+5
             time.sleep(2)
         if adb.identity()!=device.android_id:raise WorkerError('device_identity_mismatch')
         self.journal.mapping(device.external_id,device.instance_index,device.android_id,endpoint)

@@ -26,6 +26,7 @@ class Profile(Strict):
     package:str=Field(pattern=r'^[A-Za-z][A-Za-z0-9_.]+$')
     app_version:str=Field(min_length=1)
     locale:str=Field(min_length=2)
+    click_settle_seconds:float=Field(default=0,ge=0,le=2)
     navigation_verified:bool=False
     navigation_only:bool=False
     instagram_reels_452:bool=False

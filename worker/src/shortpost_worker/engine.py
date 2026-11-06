@@ -213,7 +213,7 @@ class Engine:
             device['capabilities']['health']=self.device_health.get(device['external_id'],{})
         return await self.api.heartbeat(devices,capabilities={'runtime':{'running':True,
           'live':self.live,'allow_publish':self.live and self.config.allow_publish,
-          'paused':self.journal.control('paused')=='1'}})
+          'paused':self.journal.control('paused')=='1','sequential_emulators':self.config.sequential_emulators}})
     async def health_loop(self):
         from .health import device_health
         while not self.stopping:

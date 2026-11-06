@@ -145,3 +145,12 @@ def test_existing_bot_farm_menu_includes_whole_pipeline_timing(client,seeded):
     data=client.get('/api/v1/operations/overview',headers=auth()).json()
     text='\n'.join(j['stage'] for j in data['farm']['active'])
     assert '3/6 частей' in text and '10 мин–20 мин' in text and 'Вся очередь' in text
+
+def test_cold_sequential_guest_is_standby_not_an_outage(client,seeded):
+    with transaction() as s:
+        s.get(Worker,seeded['worker']).capabilities={'runtime':{'running':True,'allow_publish':True,'paused':False,'sequential_emulators':True}}
+        s.get(Device,seeded['device']).capabilities={'health':{'at':now().isoformat(),'online':False,'identity_checked':False,'profiles':{'tiktok':{'verified':True}},'network':{}}}
+    data=client.get('/api/v1/operations/overview',headers=auth()).json()
+    assert 'device_standby' in data['accounts'][0]['reasons'] and 'device_offline' not in data['accounts'][0]['reasons']
+    from app.operations import alertable_problems
+    assert not any(p.get('account')==data['accounts'][0]['username'] for p in alertable_problems(data).values())

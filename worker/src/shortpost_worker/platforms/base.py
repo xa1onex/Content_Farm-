@@ -64,7 +64,11 @@ class PlatformPublisher(abc.ABC):
             except UIError as exc:
                 if step.optional and exc.code=='ui_selector_missing':continue
                 raise
-            if step.action=='click':self.guard.check();element.click()
+            if step.action=='click':
+                self.guard.check();element.click()
+                if self.profile.click_settle_seconds:
+                    until=time.monotonic()+self.profile.click_settle_seconds
+                    while time.monotonic()<until:self.guard.check();time.sleep(.1)
             elif step.action=='input':
                 self.guard.check();element.clear();self.guard.check();element.send_keys(self.context[step.source])
     def verify_account(self,assignment):
