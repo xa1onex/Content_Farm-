@@ -69,8 +69,9 @@ def overview(s):
     ready=s.scalar(select(func.count()).select_from(Clip).where(Clip.status=='ready',Clip.verified_at.is_not(None)))
     available={}
     for platform in ('instagram','tiktok','youtube'):
+        from app.content.usage import used_on_platform
         reserved=select(Job.clip_id).where(Job.platform==platform)
-        available[platform]=s.scalar(select(func.count()).select_from(Clip).where(Clip.status=='ready',Clip.verified_at.is_not(None),Clip.platforms.contains([platform]),Clip.id.not_in(reserved)))
+        available[platform]=s.scalar(select(func.count()).select_from(Clip).where(Clip.status=='ready',Clip.verified_at.is_not(None),Clip.platforms.contains([platform]),Clip.id.not_in(reserved),~used_on_platform(platform)))
     farm=s.get(Setting,'farm_heartbeat')
     farm_data=dict(farm.value) if farm else {}
     farm_data['online']=fresh(farm_data.get('at'),180)

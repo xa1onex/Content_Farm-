@@ -15,6 +15,7 @@ def worker_ready(worker):
     return worker.enabled and worker.heartbeat_at and worker.heartbeat_at>now()-timedelta(seconds=settings().heartbeat_timeout)
 
 def claim(s,worker_id,job_id=None):
+    from app.content.usage import used_on_platform
     w=require(s,Worker,worker_id,locked=True)
     if not worker_ready(w):raise HTTPException(409,'Worker must be enabled and send a heartbeat')
     control=s.get(Setting,'scheduler')
@@ -27,7 +28,7 @@ def claim(s,worker_id,job_id=None):
         .where(Job.status.in_(['scheduled','retry_wait']),Job.scheduled_at<=now(),
             Job.attempts<Job.max_attempts,Account.status=='active',Account.worker_id==w.id,
             Device.worker_id==w.id,Device.enabled.is_(True),
-            Device.id.not_in(busy_devices),Clip.status=='ready',Clip.verified_at.is_not(None))
+            Device.id.not_in(busy_devices),Clip.status=='ready',Clip.verified_at.is_not(None),~used_on_platform(Job.platform))
         .order_by(Job.scheduled_at,Job.id).with_for_update(of=Job,skip_locked=True))
     if job_id is not None:q=q.where(Job.id==job_id)
     candidates=list(s.scalars(q.limit(100)))

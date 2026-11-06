@@ -109,6 +109,9 @@ def create_job(s,account,clip,dt,parameters=None,plan_id=None,slot=None):
     if not compatible(s,account,clip):raise HTTPException(409,'Clip is incompatible with account filters/platform')
     from app.security import lock
     lock(s,'platform_clip:'+account.platform+':'+str(clip.id))
+    from app.content.usage import used_on_platform
+    if s.scalar(select(Clip.id).where(Clip.id==clip.id,used_on_platform(account.platform))):
+        raise HTTPException(409,'Clip permanently used on this platform')
     if s.scalar(select(Job.id).where(Job.clip_id==clip.id,Job.platform==account.platform).limit(1)):
         raise HTTPException(409,'Clip is already reserved or published on this platform')
     day=validate_slot(s,account,dt)
@@ -175,7 +178,8 @@ def generate(s,day=None,account_ids=None):
             used=select(Job.clip_id).where(Job.platform==account.platform)
             # Balance the number of previous assignments, then prefer older ready content.
             usage=select(func.count()).select_from(Job).where(Job.clip_id==Clip.id).correlate(Clip).scalar_subquery()
-            query=select(Clip).where(Clip.status=='ready',Clip.verified_at.is_not(None),Clip.id.not_in(used))
+            from app.content.usage import used_on_platform
+            query=select(Clip).where(Clip.status=='ready',Clip.verified_at.is_not(None),Clip.id.not_in(used),~used_on_platform(account.platform))
             candidates=s.scalars(query.order_by(usage,Clip.created_at,Clip.id))
             clip=next((c for c in candidates if compatible(s,account,c)),None)
             if not clip:

@@ -52,6 +52,16 @@ class Clip(Identity, Base):
     __table_args__=(CheckConstraint("status IN ('draft','ready','unavailable','archived')"),
         CheckConstraint('duration_seconds>0'),CheckConstraint("sha256 IS NULL OR sha256 ~ '^[0-9a-f]{64}$'"))
 
+class ClipPlatformUse(Base):
+    """Permanent tombstone; deliberately independent of deletable history."""
+    __tablename__='clip_platform_uses'
+    clip_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True),primary_key=True)
+    platform: Mapped[str] = mapped_column(String(20),primary_key=True)
+    sha256: Mapped[str|None] = mapped_column(String(64))
+    job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True),nullable=False)
+    used_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),nullable=False,server_default=text('now()'))
+    __table_args__=(UniqueConstraint('sha256','platform',name='uq_used_hash_platform'),)
+
 class Worker(Identity, Base):
     __tablename__='workers'
     name: Mapped[str] = mapped_column(String(160),unique=True)
