@@ -172,3 +172,38 @@ def test_batch_capacity_includes_processing_jobs(client,telegram_config):
     token=login(client).json()['token']
     r=client.post('/api/v1/miniapp/farm/batch',headers={'Authorization':'Bearer '+token,'Idempotency-Key':'processing-capacity'},json={'urls':['https://youtu.be/test'+str(i) for i in range(10)]})
     assert r.status_code==409 and '9' in r.json()['detail']
+
+def test_farm_progress_is_authenticated_scoped_and_expires(client,seeded,telegram_config):
+    from datetime import timedelta
+    from app.db import transaction,now
+    from app.models import Setting
+    from conftest import auth
+    stamp=now();user=123
+    # Use the actual signed test user from the login fixture.
+    session=login(client).json();user=session['user']['id']
+    item={'job_id':'a'*12,'queue_position':1,'stage':'transcribe','wait_min_seconds':0,'wait_max_seconds':0,
+        'remaining_min_seconds':600,'remaining_max_seconds':1200,'finish_earliest':(stamp+timedelta(seconds=600)).isoformat(),
+        'finish_latest':(stamp+timedelta(seconds=1200)).isoformat(),'confidence':'measured','source_duration_seconds':3600,'parts_done':3,'parts_total':6}
+    payload={'at':stamp.isoformat(),'items':[item,dict(item,job_id='b'*12,remaining_max_seconds=9999)]}
+    assert client.post('/api/v1/farm/progress',json=payload).status_code==401
+    assert client.post('/api/v1/farm/progress',headers=auth('worker'),json=payload).status_code==403
+    assert client.post('/api/v1/farm/progress',headers=auth('farm'),json=payload).status_code==200
+    with transaction() as s:
+        s.add(Setting(key='farm_heartbeat',value={'at':stamp.isoformat(),'jobs':[
+            {'id':'a'*12,'user_id':user,'status':'processing'},{'id':'b'*12,'user_id':user+1,'status':'queued'}]}))
+    headers={'Authorization':'Bearer '+session['token']}
+    data=client.get('/api/v1/miniapp/state',headers=headers).json()
+    assert len(data['farm_jobs'])==1 and data['farm_jobs'][0]['eta']['parts_done']==3
+    assert data['farm_timing']['remaining_max_seconds']==1200 and data['farm_timing']['job_count']==1
+    with transaction() as s:
+        value=dict(s.get(Setting,'farm_progress').value);value['received_at']=(stamp-timedelta(minutes=4)).isoformat();s.get(Setting,'farm_progress').value=value
+    data=client.get('/api/v1/miniapp/state',headers=headers).json()
+    assert data['farm_jobs'][0]['eta'] is None and not data['farm_timing']['fresh']
+
+def test_invalid_farm_timing_range_rejected(client):
+    from app.db import now
+    from conftest import auth
+    item={'job_id':'a'*12,'queue_position':1,'stage':'render','wait_min_seconds':0,'wait_max_seconds':0,
+          'remaining_min_seconds':1200,'remaining_max_seconds':600,'finish_earliest':now().isoformat(),
+          'finish_latest':now().isoformat(),'confidence':'rough','source_duration_seconds':0,'parts_done':0,'parts_total':None}
+    assert client.post('/api/v1/farm/progress',headers=auth('farm'),json={'at':now().isoformat(),'items':[item]}).status_code==422

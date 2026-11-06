@@ -79,6 +79,23 @@ def overview(s):
     farm=s.get(Setting,'farm_heartbeat')
     farm_data=dict(farm.value) if farm else {}
     farm_data['online']=fresh(farm_data.get('at'),180)
+    timing=s.get(Setting,'farm_progress')
+    timing=timing.value if timing else {}
+    if farm_data['online'] and fresh(timing.get('received_at'),120) and fresh(timing.get('at'),180):
+        def span(lo,hi):
+            def duration(seconds):
+                import math
+                m=max(1,math.ceil(seconds/300)*5)
+                return str(m)+' мин' if m<60 else str(m//60)+' ч'+(' '+str(m%60)+' мин' if m%60 else '')
+            return duration(lo)+'–'+duration(hi)
+        stages={'queued':'Ждёт очереди','download':'Загрузка','transcribe':'Расшифровка','analyze':'Выбор моментов',
+            'render':'Нарезка','upload':'Google Диск','register':'Проверка роликов','deliver':'Доставка'}
+        active_ids={j['id'] for j in farm_data.get('active',[])}
+        items=[i for i in timing.get('items',[]) if i['job_id'] in active_ids]
+        farm_data['active']=[{'id':i['job_id'],'stage':i['job_id']+' · '+stages[i['stage']]+
+            (' · '+str(i['parts_done'])+'/'+str(i['parts_total'])+' частей' if i['stage']=='transcribe' and i.get('parts_total') else '')+
+            '\nДо готовых роликов: примерно '+span(i['remaining_min_seconds'],i['remaining_max_seconds'])} for i in items]
+        if items:farm_data['active'].append({'id':'queue-total','stage':'Вся очередь: примерно '+span(max(i['remaining_min_seconds'] for i in items),max(i['remaining_max_seconds'] for i in items))+' до готовности. Включены обработка, сохранение и доставка.'})
     scheduler=s.get(Setting,'scheduler_heartbeat');control=s.get(Setting,'scheduler')
     scheduler_data={'enabled':control.value.get('enabled',True) if control else True,
       'online':fresh(scheduler.value.get('at')) if scheduler else False}

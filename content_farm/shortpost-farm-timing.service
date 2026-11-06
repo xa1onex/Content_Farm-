@@ -1,0 +1,21 @@
+[Unit]
+Description=ShortPost read-only farm timing estimates
+After=network-online.target tg-video-clipper.service
+Wants=network-online.target
+[Service]
+Type=simple
+WorkingDirectory=/root/tg-video-clipper
+ExecStart=/root/tg-video-clipper/venv/bin/python /root/tg-video-clipper/eta_reporter.py
+Restart=on-failure
+RestartSec=15
+UMask=0077
+Nice=15
+CPUQuota=35%
+MemoryMax=384M
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/root/tg-video-clipper
+[Install]
+WantedBy=multi-user.target

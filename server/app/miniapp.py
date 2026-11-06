@@ -82,6 +82,18 @@ def state(s=DB,actor=ADMIN):
     preflight=s.get(Setting,'mass_test_preflight')
     data['preflight']=preflight.value if preflight else None
     data['farm_jobs']=[j for j in heartbeat_jobs if user is None or j.get('user_id')==user]
+    progress=s.get(Setting,'farm_progress')
+    from app.operations import fresh
+    progress=progress.value if progress else {}
+    timing_fresh=data['farm']['online'] and fresh(progress.get('received_at'),120) and fresh(progress.get('at'),180)
+    timing={item['job_id']:item for item in progress.get('items',[])} if timing_fresh else {}
+    data['farm_jobs']=[dict(j,eta=timing.get(j['id'])) for j in data['farm_jobs']]
+    # Aggregate only the signed-in user's jobs; their waits already include work ahead.
+    active_etas=[j['eta'] for j in data['farm_jobs'] if j.get('eta')]
+    data['farm_timing']={'fresh':timing_fresh,'at':progress.get('at'),
+        'remaining_min_seconds':max((e['remaining_min_seconds'] for e in active_etas),default=0),
+        'remaining_max_seconds':max((e['remaining_max_seconds'] for e in active_etas),default=0),
+        'job_count':len(active_etas)}
     data['feedback']=[v.value for v in s.scalars(select(Setting).where(Setting.key.like('editorial_feedback:%'))) if v.value.get('user_id')==user]
     return data
 

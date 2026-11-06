@@ -407,6 +407,34 @@ def rotate_worker_token(worker_id:UUID,request:Request,s=DB,actor=ADMIN):
     raw=new_token();item=ApiToken(token_hash=digest(raw),role='worker',worker_id=worker_id,label=worker.name)
     s.add(item);s.flush();return {'worker_id':worker_id,'token_id':item.id,'token':raw}
 
+class FarmEstimate(Input):
+    job_id:str=Field(pattern=r'^[a-f0-9]{12}$')
+    queue_position:int=Field(ge=1,le=100)
+    stage:Literal['queued','download','transcribe','analyze','render','upload','register','deliver']
+    wait_min_seconds:int=Field(ge=0,le=604800)
+    wait_max_seconds:int=Field(ge=0,le=604800)
+    remaining_min_seconds:int=Field(ge=0,le=604800)
+    remaining_max_seconds:int=Field(ge=0,le=604800)
+    finish_earliest:datetime
+    finish_latest:datetime
+    confidence:Literal['measured','rough']
+    source_duration_seconds:int=Field(ge=0,le=21600)
+    parts_done:int=Field(ge=0,le=36)
+    parts_total:int|None=Field(default=None,ge=0,le=36)
+class FarmProgress(Input):
+    at:datetime
+    items:list[FarmEstimate]=Field(max_length=100)
+@router.post('/farm/progress')
+def farm_progress(data:FarmProgress,s=DB,actor=FARM):
+    for item in data.items:
+        if item.remaining_min_seconds>item.remaining_max_seconds or item.wait_min_seconds>item.wait_max_seconds:
+            raise HTTPException(422,'Invalid timing range')
+    item=s.get(Setting,'farm_progress',with_for_update=True)
+    value=data.model_dump(mode='json')|{'received_at':now().isoformat()}
+    if item:item.value=value
+    else:s.add(Setting(key='farm_progress',value=value))
+    return {'received':True}
+
 class FarmHeartbeat(Input):
     counts:dict[str,int]
     jobs:list[dict] = []

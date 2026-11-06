@@ -135,3 +135,13 @@ def test_publication_notification_survives_operational_alert_mute(client,seeded)
         s.add(Event(kind='publication_published',dedup_key='published-proof',detail={'platform':'instagram','username':'test','url':'https://www.instagram.com/reel/confirmed/'}))
     r=client.post('/api/v1/telegram/notifications/claim',headers=auth(),json={})
     assert r.status_code==200 and 'Ролик опубликован' in r.json()['delivery']['text']
+
+def test_existing_bot_farm_menu_includes_whole_pipeline_timing(client,seeded):
+    stamp=now().isoformat()
+    item={'job_id':'a'*12,'stage':'transcribe','remaining_min_seconds':600,'remaining_max_seconds':1200,'parts_done':3,'parts_total':6}
+    with transaction() as s:
+        s.add(Setting(key='farm_heartbeat',value={'at':stamp,'active':[{'id':'a'*12,'stage':'Обработка'}]}))
+        s.add(Setting(key='farm_progress',value={'at':stamp,'received_at':stamp,'items':[item]}))
+    data=client.get('/api/v1/operations/overview',headers=auth()).json()
+    text='\n'.join(j['stage'] for j in data['farm']['active'])
+    assert '3/6 частей' in text and '10 мин–20 мин' in text and 'Вся очередь' in text
