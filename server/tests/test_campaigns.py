@@ -31,3 +31,10 @@ def test_delay_starts_at_confirmed_publication_and_is_never_compressed(seeded):
         s.add(Setting(key='campaign_job:'+str(j.id),value={'campaign_id':'test','previous_job_id':str(j.id),'delay_seconds':120}));s.flush()
         assert not release_ready(s,j)
         pub.published_at=now()-timedelta(seconds=121);s.flush();assert release_ready(s,j)
+
+def test_quarantined_uncertain_job_can_never_be_retried(client,seeded):
+    from conftest import auth
+    with transaction() as s:
+        j=s.get(Job,seeded['job']);j.status='cancelled';j.result={'outcome':'unknown','no_republish':True}
+    r=client.post('/api/v1/jobs/'+str(seeded['job'])+'/action',headers=auth(),json={'action':'retry','scheduled_at':(now()+timedelta(hours=1)).isoformat(),'reason':'Try repeating quarantined publication'})
+    assert r.status_code==409 and 'quarantined' in r.json()['detail']

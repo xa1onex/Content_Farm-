@@ -17,11 +17,11 @@ from .platforms.profile import Profile
 
 def timestamp():return datetime.now(timezone.utc).isoformat()
 
-def network(adb, expected):
+def network(adb, expected, transport='socks5'):
     result={'at':timestamp(),'ready':False,'checked':False}
-    if not expected:return result
+    if not expected and transport!='direct':return result
     try:
-        ipaddress.ip_address(expected)
+        if expected:ipaddress.ip_address(expected)
         payload='GET /?shortpost='+os.urandom(8).hex()+' HTTP/1.1\r\nHost: api.ipify.org\r\nConnection: close\r\n\r\n'
         escaped=''.join('\\%03o'%v for v in payload.encode())
         raw=adb.shell('sh','-c',"printf '"+escaped+"' | toybox nc -4 -w 8 -W 8 -q 8 api.ipify.org 80 | toybox od -An -v -tx1",timeout=15)
@@ -29,11 +29,22 @@ def network(adb, expected):
         class Socket:
             def makefile(self,*args):return io.BytesIO(bytes.fromhex(raw))
         response=http.client.HTTPResponse(Socket());response.begin()
-        tcp=response.status==200 and response.read(128).decode('ascii').strip()==expected
+        actual_tcp=response.read(128).decode('ascii').strip() if response.status==200 else ''
+        try:ipaddress.IPv4Address(actual_tcp);tcp=transport=='direct' or actual_tcp==expected
+        except ValueError:tcp=False
+        if transport=='direct':
+            result.update(checked=True,ready=tcp,tcp_verified=tcp,mode='direct',exit_ip=actual_tcp);return result
+        result.update(checked=True,tcp_verified=tcp)
+        if transport=='http':
+            # HTTP CONNECT gateways cannot carry UDP; STUN must stay blocked, never exit directly.
+            result.update(ready=False,udp_policy='blocked')
         # Binary STUN is transferred as hex, avoiding Windows text decoding loss.
         transaction=os.urandom(12);request=b'\x00\x01\x00\x00\x21\x12\xa4\x42'+transaction
         escaped=''.join('\\%03o'%v for v in request)
-        raw=adb.shell('sh','-c',"printf '"+escaped+"' | toybox nc -4 -u -w 8 -W 4 -q 4 stun.l.google.com 19302 | toybox od -An -v -tx1",timeout=15)
+        try:raw=adb.shell('sh','-c',"printf '"+escaped+"' | toybox nc -4 -u -w 8 -W 4 -q 4 stun.l.google.com 19302 | toybox od -An -v -tx1",timeout=15)
+        except Exception:
+            if transport=='http':result.update(ready=tcp,udp_blocked=True);return result
+            raise
         response=bytes.fromhex(raw);udp=False
         if response[:2]==b'\x01\x01' and response[4:8]==request[4:8] and response[8:20]==transaction and len(response)==20+int.from_bytes(response[2:4],'big'):
             pos=20
@@ -42,7 +53,7 @@ def network(adb, expected):
                 if kind==0x0020 and size==8 and value[:2]==b'\x00\x01':
                     actual=str(ipaddress.ip_address(bytes(a^b for a,b in zip(value[4:8],request[4:8]))))
                     udp=actual==expected
-        result.update(tcp_verified=tcp,udp_verified=udp,ready=tcp and udp,checked=True)
+        result.update(tcp_verified=tcp,udp_verified=udp,ready=tcp and (udp if transport!='http' else not response),udp_blocked=transport=='http' and not response,checked=True)
     except Exception:pass
     return result
 
@@ -75,6 +86,6 @@ def device_health(config, device):
         for platform,path in device.profiles.items():
             profile=Profile.load(path)
             health['profiles'][platform]['verified'] &= adb.version(profile.package)==profile.app_version
-        health['network']=network(adb,device.proxy_expected_ip)
+        health['network']=network(adb,device.proxy_expected_ip,device.proxy_transport)
     except Exception:pass
     return health

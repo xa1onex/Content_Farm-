@@ -47,3 +47,13 @@ def test_disconnected_device_does_not_claim_identity_or_proxy_failure(config,mon
     report=device_health(config,config.devices[0])
     assert not report['identity_checked'] and not report['identity_verified']
     probe.assert_not_called()
+
+def test_explicit_direct_mode_can_check_network_without_proxy():
+    adb=Mock();adb.shell.return_value=(b'HTTP/1.1 200 OK\r\nContent-Length: 11\r\n\r\n203.0.113.9').hex()
+    report=network(adb,None,'direct');assert report['ready'] and report['mode']=='direct'
+
+def test_http_connect_requires_tcp_match_and_blocked_udp():
+    adb=Mock();adb.shell.side_effect=[(b'HTTP/1.1 200 OK\r\nContent-Length: 11\r\n\r\n203.0.113.9').hex(),'']
+    report=network(adb,'203.0.113.9','http');assert report['ready'] and report['udp_blocked']
+    adb.shell.side_effect=[(b'HTTP/1.1 200 OK\r\nContent-Length: 11\r\n\r\n203.0.113.8').hex(),'']
+    assert not network(adb,'203.0.113.9','http')['ready']

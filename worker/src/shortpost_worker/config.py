@@ -13,6 +13,7 @@ class DeviceConfig(Strict):
     android_id:str=Field(min_length=8,max_length=100)
     enabled:bool=True
     proxy_expected_ip:str|None=None
+    proxy_transport:Literal['socks5','http','direct']='socks5'
     adb_endpoint:str|None=None
     appium_url:str='http://127.0.0.1:4723'
     system_port:int=Field(default=8200,ge=1024,le=65535)

@@ -6,7 +6,7 @@ from fastapi.responses import FileResponse,StreamingResponse
 from pydantic import BaseModel,Field
 from sqlalchemy import select
 from app.db import db_session,now
-from app.models import Clip,Setting,ClipPlatformUse
+from app.models import Clip,Setting,ClipPlatformUse,Job,Account
 from app.editorial import FeedbackInput,feedback_record
 from app.security import lock
 router=APIRouter();DB=Depends(db_session,scope='function')
@@ -34,13 +34,16 @@ def items(s,user):
     for v in s.scalars(select(ClipPlatformUse)):uses.setdefault(str(v.clip_id),[]).append(v.platform)
     from app.content.moderation import rejected
     rejected_ids=set(s.scalars(select(Clip.id).where(rejected())))
+    releases={}
+    for job,account in s.execute(select(Job,Account).join(Account,Account.id==Job.account_id).order_by(Job.created_at)):
+        if s.get(Setting,'campaign_job:'+str(job.id)):releases[str(job.clip_id)]={'at':job.scheduled_at.isoformat(),'account':account.username,'status':job.status}
     out=[]
     for c in s.scalars(select(Clip).order_by(Clip.created_at.desc())):
         if c.status!='ready' and str(c.id) not in deleted:continue
         used=uses.get(str(c.id),[])
         if all(p in used for p in c.platforms):continue
         f=feedback.get(str(c.id),{});decision='deleted' if str(c.id) in deleted else 'approved' if str(c.id) in approvals and c.id not in rejected_ids else 'rejected' if c.id in rejected_ids else 'pending'
-        out.append({'id':str(c.id),'title':c.title,'description':c.description,'seconds':c.duration_seconds,'decision':decision,'comment':f.get('comment',''),'used':used,'created_at':c.created_at.isoformat()})
+        out.append({'id':str(c.id),'title':c.title,'description':c.description,'seconds':c.duration_seconds,'decision':decision,'comment':f.get('comment',''),'used':used,'created_at':c.created_at.isoformat(),'release':releases.get(str(c.id))})
     return out
 
 @router.get('/api/v1/review')

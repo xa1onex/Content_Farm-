@@ -238,3 +238,18 @@ async def test_revoked_submit_permission_never_clicks_publish(config,journal,ass
         assert clicks==[] and backend.results[0]['outcome']=='safe_failure'
         assert journal.jobs()[0]['irreversible_at'] is None
     finally:await api.close()
+
+@pytest.mark.asyncio
+async def test_closed_uncertain_history_reconciles_without_repeating_any_click(config,journal,assignment,monkeypatch):
+    backend,api,engine,clicks=setup(config,journal,assignment,monkeypatch)
+    journal.mark_irreversible(assignment['job']['id'],1)
+    backend.status='cancelled'
+    original=backend.handler
+    def handler(request):
+        if request.method=='GET' and request.url.path.endswith('/'+assignment['job']['id']):return httpx.Response(200,json={**assignment['job'],'status':'cancelled','result':{'outcome':'unknown','no_republish':True}})
+        return original(request)
+    api.client._transport=httpx.MockTransport(handler)
+    try:
+        await engine.recover()
+        assert clicks==[] and journal.jobs()[0]['stage']=='reconciled'
+    finally:await api.close()
