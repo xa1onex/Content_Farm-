@@ -38,10 +38,16 @@ def authenticate(request: Request, credentials: HTTPAuthorizationCredentials|Non
                 .returning(RateBucket.count))
         count=consume(key)
         ip_count=consume('ip:'+digest(request.client.host if request.client else 'unknown'))
-        token=s.scalar(select(ApiToken).where(ApiToken.token_hash==key,ApiToken.enabled.is_(True))) if raw else None
-        actor=Actor(token.id,token.role,token.worker_id) if token else None
+        if raw.startswith('tma.'):
+            actor=None
+        else:
+            token=s.scalar(select(ApiToken).where(ApiToken.token_hash==key,ApiToken.enabled.is_(True))) if raw else None
+            actor=Actor(token.id,token.role,token.worker_id) if token else None
     if count>settings().rate_limit_per_minute or ip_count>settings().rate_limit_per_minute*5:
         raise HTTPException(429,'Rate limit exceeded',headers={'Retry-After':'60'})
+    if raw.startswith('tma.'):
+        from app.miniapp_auth import session_user
+        actor=Actor('telegram:'+str(session_user(raw)),'admin')
     if actor is None:
         raise HTTPException(401,'Invalid bearer token',headers={'WWW-Authenticate':'Bearer'})
     return actor

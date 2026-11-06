@@ -32,6 +32,8 @@ async def lifespan(app):
 app=FastAPI(title='Autopost Server',version='1.0.0',lifespan=lifespan,
     description='Server protocol only. No social media publication is performed by this server.')
 app.include_router(router)
+from app.miniapp import router as miniapp_router
+app.include_router(miniapp_router)
 
 @app.middleware('http')
 async def request_context(request:Request,call_next):

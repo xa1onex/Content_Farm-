@@ -171,3 +171,18 @@ class RetryTests(unittest.IsolatedAsyncioTestCase):
             state=json.loads((p/'state.json').read_text())
             self.assertEqual(state['status'],'retry_wait');self.assertEqual(state['auto_retry_count'],1)
             self.assertTrue(state['retry_at']>0);self.assertTrue((p/'transcript.json').exists())
+
+class MiniAppRequestTests(unittest.IsolatedAsyncioTestCase):
+    async def test_replayed_request_does_not_enqueue_another_job(self):
+        from collections import defaultdict
+        import uuid
+        with tempfile.TemporaryDirectory() as d:
+            q=asyncio.Queue();message=SimpleNamespace(from_user=SimpleNamespace(id=7),chat=SimpleNamespace(id=7,type='private'),video=None,document=None,text='https://youtu.be/dQw4w9WgXcQ',answer=AsyncMock())
+            request_id=str(uuid.uuid4())
+            with patch.object(bot,'JOB_DIR',Path(d)),patch.object(bot,'queue',q),patch.object(bot,'busy_users',set()),patch.object(bot,'scheduled',set()),patch.object(bot,'last_submit',{}),patch.object(bot,'user_locks',defaultdict(asyncio.Lock)):
+                first=await bot.submit(message,None,request_id=request_id)
+                second=await bot.submit(message,None,request_id=request_id)
+                self.assertEqual(first['job_id'],second['job_id']);self.assertEqual(q.qsize(),1)
+                self.assertEqual(message.answer.await_count,1)
+                state=json.loads((Path(d)/first['job_id']/'state.json').read_text())
+                self.assertEqual(state['miniapp_request_id'],request_id)

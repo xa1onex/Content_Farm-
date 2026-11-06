@@ -3,16 +3,34 @@ install(dispatcher, '/etc/shortpost/telegram.json') registers panel callbacks an
 message middleware without starting another getUpdates consumer.
 """
 import asyncio,html,json,secrets,time
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from urllib.request import Request,urlopen
 from urllib.error import HTTPError,URLError
 from aiogram import BaseMiddleware,F,types
+from aiogram.exceptions import TelegramBadRequest
+
+class PanelMessage:
+    """Navigation edits its anchor; explicit text-input prompts may be new messages."""
+    def __init__(self,message):self.message=message
+    def __getattr__(self,name):return getattr(self.message,name)
+    async def answer(self,text,**kwargs):
+        if isinstance(kwargs.get('reply_markup'),types.ForceReply):return await self.message.answer(text,**kwargs)
+        try:return await self.message.edit_text(text,**kwargs)
+        except TelegramBadRequest as exc:
+            error=str(exc).lower()
+            if 'message is not modified' in error:return self.message
+            if any(code in error for code in ("message can't be edited",'message to edit not found','message_id_invalid')):
+                return await self.message.answer(text,**kwargs)
+            raise
 
 class AdminExtension:
     def __init__(self,config):
         self.config=config
         self.pending={}
         self.forms={}
+        self.panels={}
     def allowed(self,event):
         user=event.from_user
         chat=event.chat if isinstance(event,types.Message) else (event.message.chat if event.message else None)
@@ -34,15 +52,24 @@ class AdminExtension:
         return await asyncio.to_thread(run)
     def buttons(self,rows):
         return types.InlineKeyboardMarkup(inline_keyboard=[[
-            types.InlineKeyboardButton(text=label,callback_data='ap:'+value) for label,value in row] for row in rows])
+            types.InlineKeyboardButton(text=label,web_app=types.WebAppInfo(url=self.config['miniapp_url']))
+            if value=='webapp' and self.config.get('miniapp_url') else types.InlineKeyboardButton(text=label,callback_data='ap:'+value)
+            for label,value in row] for row in rows])
     async def menu(self,message):
+        if not isinstance(message,PanelMessage) and message.chat.id in self.panels:message=PanelMessage(self.panels[message.chat.id])
+        if self.config.get('miniapp_url'):
+            from aiogram.exceptions import TelegramAPIError
+            try:await message.bot.set_chat_menu_button(chat_id=message.chat.id,menu_button=types.MenuButtonWebApp(text='Панель',web_app=types.WebAppInfo(url=self.config['miniapp_url'])))
+            except TelegramAPIError:pass
         await self.api('POST','/api/v1/telegram/subscriptions',{'chat_id':message.chat.id,'enabled':True})
-        await message.answer('Контентферма и автопостинг\nПришли видео или ссылку — я создам ролики и передам их в очередь публикаций.',
-            reply_markup=self.buttons([[('Состояние системы','overview'),('Создать ролики','create')],
-                [('Контентферма','farm'),('Автопостинг','scheduler')],
-                [('Аккаунты','accounts:0'),('Ролики','content:0')],
-                [('ПК и эмуляторы','fleet'),('Проблемы','problems')],
-                [('Очередь','jobs:0'),('Результаты','publications:0')]]))
+        rows=([[('Открыть дашборд ↗','webapp')]] if self.config.get('miniapp_url') else [])+[
+            [('Обзор','overview'),('Создать ролики','create')],[('Мои аккаунты','accounts:0'),('Медиатека','content:0')],
+            [('Расписание','scheduler'),('Очередь отправок','jobs:0')],[('Контентферма','farm'),('Устройства и сеть','fleet')],
+            [('Что требует внимания','problems'),('Опубликовано','publications:0')]]
+        sent=await message.answer('<b>ShortPost · Центр управления</b>\n\nВидео → готовые ролики → Google Диск → публикации.\n\n'
+            'Открой дашборд для удобной работы или выбери раздел ниже. Кнопки обновляют эту панель, не засоряя чат.',parse_mode='HTML',reply_markup=self.buttons(rows))
+        if len(self.panels)>1000:self.panels.clear()
+        if isinstance(sent,types.Message):self.panels[message.chat.id]=sent
     async def dashboard(self,message,section='overview'):
         data=await self.api('GET','/api/v1/operations/overview')
         if 'error' in data:
@@ -81,12 +108,19 @@ class AdminExtension:
         else:
             lines=['Текущие проблемы']+[p['message']+(' · '+p['account'] if p.get('account') else '') for p in data['problems']]
             if not data['problems']:lines.append('Всё работает.')
-        await message.answer(html.escape('\n'.join(lines))[:3900],parse_mode='HTML',reply_markup=self.buttons([[('Обновить',section),('Меню','menu')]]))
+        await message.answer(html.escape('\n'.join(lines)[:3500]),parse_mode='HTML',reply_markup=self.buttons([[('Обновить',section),('Меню','menu')]]))
     async def show(self,message,section,offset=0):
         paths={'report':'analytics/report','settings':'settings'}
         path='/api/v1/'+paths.get(section,section)
         if section not in ('report','settings'):path+=f'?limit=8&offset={offset}'
         result=await self.api('GET',path)
+        if section=='content':
+            result=await self.api('GET','/api/v1/miniapp/state')
+            if 'error' not in result:result={'items':result.get('content',[])[offset:offset+8]}
+        titles={};account_names={}
+        if section=='jobs' and 'error' not in result:
+            library=await self.api('GET','/api/v1/content?limit=200');accounts=await self.api('GET','/api/v1/accounts?limit=200')
+            titles={c['id']:c['title'] for c in library.get('items',[])};account_names={a['id']:a['username'] for a in accounts.get('items',[])}
         rows=[];lines=[]
         if section=='accounts':rows.append([('Добавить аккаунт','add_account')])
         names={'accounts':'Аккаунты','content':'Готовые ролики','jobs':'Очередь публикаций',
@@ -103,11 +137,16 @@ class AdminExtension:
                 lines.append(item['platform']+' · @'+item['username']+' · '+statuses.get(item['status'],item['status'])+f" · сегодня {item.get('effective_daily_limit',item['daily_limit'])}/день")
                 rows.append([('@'+item['username']+' · управление','account_view:'+item['id'])])
             elif section=='content':
-                lines.append(item['title'][:180]+' · '+statuses.get(item['status'],item['status']))
+                availability={'used':'использован','reserved':'в очереди','available':'доступен','unavailable':'недоступен'}
+                names_platform={'instagram':'Instagram','tiktok':'TikTok','youtube':'Shorts'}
+                lines.append('\n'+item['title'][:180])
+                if isinstance(item.get('platforms'),dict):lines.append(' · '.join(names_platform[p]+': '+availability.get(v,v) for p,v in item['platforms'].items()))
             elif section=='jobs':
-                lines.append(statuses.get(item['status'],item['status'])+' · '+item['scheduled_at'][:16].replace('T',' ')+' UTC')
+                scheduled=datetime.fromisoformat(item['scheduled_at']).astimezone(ZoneInfo('Europe/Moscow')).strftime('%d.%m · %H:%M')
+                lines.append('\n'+titles.get(item['clip_id'],'Ролик')[:140])
+                lines.append('@'+account_names.get(item['account_id'],'аккаунт')+' · '+scheduled+' МСК · '+statuses.get(item['status'],item['status']))
                 if item['status'] in ('failed','paused','retry_wait','scheduled','pending'):
-                    rows.append([('Отменить задание '+item['id'][:6],'job:'+item['id'])])
+                    rows.append([('Отменить отправку №'+str(len(rows)+1),'job:'+item['id'])])
             elif section=='publications':
                 lines.append(item.get('url') or 'Публикация подтверждена')
             elif section=='events':
@@ -117,9 +156,12 @@ class AdminExtension:
             elif section=='schedules':lines.append(item['local_date']+' · расписание создано')
         if not result.get('items'):lines.append('Пока нет записей.')
         if section not in ('report','settings'):
-            rows.append([('Назад',f'{section}:{max(0,offset-8)}'),('Далее',f'{section}:{offset+8}')])
+            pages=[]
+            if offset>0:pages.append(('← Предыдущие',f'{section}:{max(0,offset-8)}'))
+            if len(result.get('items',[]))==8:pages.append(('Следующие →',f'{section}:{offset+8}'))
+            if pages:rows.append(pages)
         rows.append([('Меню','menu')])
-        await message.answer(html.escape('\n'.join(lines))[:3900],parse_mode='HTML',reply_markup=self.buttons(rows))
+        await message.answer(html.escape('\n'.join(lines)[:3500]),parse_mode='HTML',reply_markup=self.buttons(rows))
     async def review(self,message,user_id,method,path,body):
         stamp=time.monotonic()
         self.pending={k:v for k,v in self.pending.items() if v['expires']>stamp}
@@ -155,7 +197,35 @@ class AdminExtension:
             await asyncio.sleep(5)
     async def startup(self,bot,**kwargs):
         self.notification_task=asyncio.create_task(self.notifications(bot))
+        if self.config.get('miniapp_url'):
+            from aiogram.exceptions import TelegramAPIError
+            try:await bot.set_chat_menu_button(menu_button=types.MenuButtonWebApp(text='Панель',web_app=types.WebAppInfo(url=self.config['miniapp_url'])))
+            except TelegramAPIError:
+                import logging
+                logging.getLogger(__name__).warning('miniapp_menu_setup_retry_needed')
+        if getattr(self,'source_handler',None):self.source_task=asyncio.create_task(self.source_requests(bot))
+    async def source_requests(self,bot):
+        while True:
+            try:
+                result=await self.api('POST','/api/v1/telegram/farm-requests/claim',{})
+                item=result.get('request')
+                if item:
+                    message=types.Message(message_id=0,date=int(time.time()),chat=types.Chat(id=item['user_id'],type='private'),
+                        from_user=types.User(id=item['user_id'],is_bot=False,first_name='Пользователь'),text=item['url']).as_(bot)
+                    response=await self.source_handler(message,bot,request_id=item['id'])
+                    await self.api('POST','/api/v1/telegram/farm-requests/'+item['id']+'/result',
+                        {'lease':item['lease'],'job_id':response.get('job_id') if response else None,
+                         'error':None if response and response.get('job_id') else 'Не удалось создать задание. Подробности в чате бота.'})
+            except Exception:
+                import logging
+                logging.getLogger(__name__).warning('miniapp_source_delivery_retry')
+            await asyncio.sleep(5)
     async def shutdown(self,**kwargs):
+        source_task=getattr(self,'source_task',None)
+        if source_task:
+            source_task.cancel()
+            try:await source_task
+            except asyncio.CancelledError:pass
         task=getattr(self,'notification_task',None)
         if task:
             task.cancel()
@@ -170,7 +240,8 @@ class AdminExtension:
             await message.answer('Имя не распознано. Открой «Аккаунты → Добавить аккаунт» и укажи имя без ссылки.');return
         result=await self.api('POST','/api/v1/accounts',{'name':username,'username':username,'platform':form['platform'],
           'worker_id':form['worker_id'],'device_id':form['device_id'],'status':'paused','daily_limit':3,'warmup_enabled':True,'timezone':'Europe/Moscow'})
-        await message.answer('Аккаунт добавлен. Его готовность видна в состоянии системы.' if 'error' not in result else 'Не удалось добавить аккаунт: возможно, он уже привязан к этому эмулятору.',reply_markup=self.buttons([[('Состояние','overview'),('Аккаунты','accounts:0')]]))
+        target=PanelMessage(self.panels[message.chat.id]) if message.chat.id in self.panels else message
+        await target.answer('Аккаунт добавлен на паузе. Проверь вход в приложении и включи его в разделе «Мои аккаунты».' if 'error' not in result else 'Не удалось добавить аккаунт: возможно, он уже привязан к этому эмулятору.',reply_markup=self.buttons([[('Обзор','overview'),('Мои аккаунты','accounts:0')]]))
     async def message(self,message):
         if not self.allowed(message):
             await message.answer('Доступ запрещён.');return
@@ -214,7 +285,9 @@ class AdminExtension:
         if not self.allowed(query):await query.answer('Доступ запрещён',show_alert=True);return
         await query.answer()
         payload=(query.data or '')[3:]
-        message=query.message
+        if not isinstance(query.message,types.Message):return
+        message=PanelMessage(query.message)
+        self.panels[message.chat.id]=query.message
         if payload=='menu':await self.menu(message);return
         if payload=='add_account':
             await message.answer('Выбери платформу.',reply_markup=self.buttons([[('Instagram','add_platform:instagram'),('TikTok','add_platform:tiktok'),('YouTube','add_platform:youtube')]]));return
@@ -236,7 +309,7 @@ class AdminExtension:
             form['prompt_id']=sent.message_id
             return
         if payload=='create':
-            await message.answer('Пришли сюда ссылку YouTube, ссылку на видео в нашей папке Google Диска или видеофайл до 20 МБ. Создание роликов, сохранение и передача в автопостинг выполняются автоматически.');return
+            await message.answer('<b>Создать ролики</b>\n\nПришли в этот чат ссылку YouTube или Google Диска. Видео до 20 МБ можно отправить файлом.\n\nЯ нарежу исходник, сохраню ролики на Диск и передам их автопостингу. Статус обработки и результаты появятся отдельно.',parse_mode='HTML',reply_markup=self.buttons([[('Назад в меню','menu')]]));return
         if payload in ('overview','farm','fleet','problems'):
             await self.dashboard(message,payload);return
         if payload.startswith('account_view:'):
@@ -248,8 +321,8 @@ class AdminExtension:
             _,identifier,limit=payload.split(':')
             await self.review(message,query.from_user.id,'PATCH','/api/v1/accounts/'+identifier,{'daily_limit':int(limit)});return
         if payload=='scheduler':
-            await message.answer('Планировщик: остановка не прерывает задания, уже принятые Worker.',
-                reply_markup=self.buttons([[('Запустить','scheduler_on'),('Остановить','scheduler_off')],[('Сформировать','generate')]]));return
+            await message.answer('<b>Расписание публикаций</b>\n\nРазгон аккаунта: 1 → 1 → 2 → 3 ролика в день. Повторы на одной платформе запрещены.\n\nПауза останавливает новые отправки. Уже начатые завершаются.',parse_mode='HTML',
+                reply_markup=self.buttons([[('Включить расписание','scheduler_on')],[('Приостановить новые отправки','scheduler_off')],[('Обновить расписание','generate')],[('Очередь отправок','jobs:0'),('Меню','menu')]]));return
         if payload in ('scheduler_on','scheduler_off','generate'):
             await self.review(message,query.from_user.id,'POST','/api/v1/schedules/'+('generate' if payload=='generate' else 'control'),
                 {} if payload=='generate' else {'enabled':payload=='scheduler_on'});return
@@ -258,10 +331,10 @@ class AdminExtension:
             if not item or item['expires']<time.monotonic() or item['user']!=query.from_user.id:
                 await message.answer('Подтверждение истекло или принадлежит другому пользователю.');return
             if payload.startswith('discard:'):
-                self.pending.pop(key,None);await message.answer('Отменено.');return
+                self.pending.pop(key,None);await message.answer('Изменения отменены.',reply_markup=self.buttons([[('Вернуться в меню','menu')]]));return
             result=await self.api(item['method'],item['path'],item['body'],item['idempotency_key'])
             if 'error' not in result:self.pending.pop(key,None)
-            await message.answer('Не удалось сохранить изменения: '+html.escape(str(result['error']))[:500] if 'error' in result else 'Готово. Изменения сохранены.',reply_markup=self.buttons([[('Состояние','overview'),('Меню','menu')]]));return
+            await message.answer('Не удалось сохранить изменения: '+html.escape(str(result['error'])[:500]) if 'error' in result else 'Готово. Изменения сохранены.',reply_markup=self.buttons([[('Состояние','overview'),('Меню','menu')]]));return
         if payload.startswith('account:'):
             identifier=payload.split(':',1)[1]
             account=await self.api('GET','/api/v1/accounts/'+identifier)

@@ -294,11 +294,16 @@ async def retry(message:types.Message):
         await message.answer(f'Задание <code>{parts[1]}</code> добавлено в очередь.')
 
 @dp.message()
-async def submit(message:types.Message,bot:Bot):
+async def submit(message:types.Message,bot:Bot,request_id=None):
     if not message.from_user or message.chat.type!='private':
         await message.answer('Отправь видео в личный чат с ботом.')
         return
     async with user_locks[message.from_user.id]:
+        requested_id=uuid.UUID(request_id).hex[:12] if request_id else None
+        if requested_id and (JOB_DIR/requested_id/'state.json').exists():
+            previous=load_state(JOB_DIR/requested_id)
+            if previous.get('miniapp_request_id')!=request_id or previous['user_id']!=message.from_user.id:raise RuntimeError('Request identity conflict')
+            return {'job_id':requested_id,'status':previous['status']}
         if message.from_user.id in busy_users:
             await message.answer('У тебя уже есть задание в очереди или обработке. Посмотреть: /status')
             return
@@ -325,12 +330,12 @@ async def submit(message:types.Message,bot:Bot):
                 await message.answer(html.escape(str(exc)))
                 return
             source = {'kind':kind,'value':value}
-        job_id = uuid.uuid4().hex[:12]
+        job_id = requested_id or uuid.uuid4().hex[:12]
         job_dir = JOB_DIR/job_id
         job_dir.mkdir(parents=True,mode=0o700)
         state = {'id':job_id,'user_id':message.from_user.id,'chat_id':message.chat.id,
             'source':source,'status':'receiving','created':datetime.now(timezone.utc).isoformat(),
-            'archived':False,'delivered':False}
+            'archived':False,'delivered':False,'miniapp_request_id':request_id}
         save_private_json(job_dir/'state.json',state)
         busy_users.add(message.from_user.id)
         try:
@@ -346,6 +351,7 @@ async def submit(message:types.Message,bot:Bot):
             await message.answer('Не удалось получить видео. Попробуй отправить ещё раз.')
             return
         await message.answer(f'Принято. Задание <code>{job_id}</code>, перед ним в очереди: {max(0,queue.qsize()-1)}.')
+        return {'job_id':job_id,'status':'queued'}
 
 def math_ceil(value):
     return int(value)+int(value>int(value))
@@ -372,6 +378,7 @@ async def main():
             sys.path.insert(0,str(BASE_DIR.parent/'server'))
             from app.telegram_admin.extension import install
         control=install(dp,str(panel_config))
+        control.source_handler=submit
     token = os.getenv('BOT_TOKEN')
     if not token:
         raise RuntimeError('BOT_TOKEN is not set')
