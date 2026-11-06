@@ -35,10 +35,18 @@ def observe(folder,metadata=None):
             data=json.loads(manifest.read_text());clips=data.get('clips',[]);row['selected']=len(clips);row['rendered']=len(clips);row['duration']=number(data.get('duration'),row['duration'])
         except (OSError,ValueError):pass
     row['manifest']=manifest.exists();row['archived']=bool(state.get('archived'));row['registered']=bool(state.get('registered'));row['delivered']=bool(state.get('delivered'))
+    try:
+        compute=json.loads((folder/'compute-progress.json').read_text())
+        age=time.time()-datetime.fromisoformat(compute['at']).timestamp()
+        if 0<=age<=180 and compute.get('backend')=='cuda':
+            row['pc_ratio']=number(compute.get('transfer_and_inference_seconds'))/max(1,number(compute.get('audio_seconds')))
+    except (OSError,ValueError,KeyError,TypeError):pass
     row['delivery_count']=len(state.get('delivered_files',[]));row['source_kind']=state.get('source',{}).get('kind')
     return row
 
 def measured_ratio(rows):
+    gpu=[r['pc_ratio'] for r in rows if .01<=number(r.get('pc_ratio'))<=2]
+    if gpu:return statistics.median(gpu)
     values=[]
     for row in rows:
         stamps=row.get('part_times',[])
@@ -58,6 +66,9 @@ def remaining(row,ratio=None,render_rate=None):
         left=max(0,duration-min(duration,row.get('parts',0)*600))
         # Within a chunk progress is unknown; do not count the whole recording again.
         low+=left*low_rate;high+=left*high_rate
+    if not transcribed and ratio is not None and ratio<.25 and row.get('parts',0)<2:
+        # The CPU establishes the source language while the GPU starts prefetch.
+        low+=180;high+=900
     if selected is None and not row.get('manifest'):low+=60;high+=300
     unfinished=max(0,count-row.get('rendered',0))
     low+=unfinished*(max(10,render_rate*.75) if render_rate else 45)

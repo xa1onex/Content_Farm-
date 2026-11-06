@@ -1,0 +1,8 @@
+{
+  "port": 22022,
+  "username": "admin",
+  "key": "/root/tg-video-clipper/compute_key",
+  "known_hosts": "/root/tg-video-clipper/compute_known_hosts",
+  "python": "C:\\Windows\\System32\\Content_Farm-\\.venv-compute\\Scripts\\python.exe",
+  "remote_root": "C:/Users/admin/AppData/Local/ShortPost/compute"
+}

@@ -41,3 +41,8 @@
 
 # Telegram administration keys belong only on the server.
 **/telegram_admin.json
+
+# Server-to-PC compute credentials and standalone Windows inference environment.
+**/.venv-compute/
+**/compute-connection.json
+**/compute-transfer/

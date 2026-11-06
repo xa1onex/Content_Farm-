@@ -30,3 +30,10 @@ class TimingTests(unittest.TestCase):
    p=Path(root);state={'id':'a'*12,'status':'processing','clip_outputs':{'0':{'file':'CF-X.mp4'},'1':{'file':'missing.mp4'}}}
    original=json.dumps(state);(p/'state.json').write_text(original);(p/'CF-X.mp4').write_bytes(b'clip');(p/'short_02.mp4').write_bytes(b'unfinished')
    observed=observe(p,{'duration':100});self.assertEqual(observed['rendered'],1);self.assertEqual((p/'state.json').read_text(),original)
+
+ def test_recent_pc_measurement_updates_gpu_queue_forecast(self):
+  row=self.row(pc_ratio=.12)
+  self.assertEqual(measured_ratio([row]),.12)
+  cpu=estimate([self.row()],at=1000)['items'][0]
+  gpu=estimate([row],at=1000)['items'][0]
+  self.assertLess(gpu['remaining_max_seconds'],cpu['remaining_max_seconds'])
