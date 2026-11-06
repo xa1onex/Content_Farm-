@@ -1,12 +1,12 @@
 """Standalone aiogram 3 extension. It needs only aiogram and the Python standard library.
-install(dispatcher, '/etc/shortpost/telegram.json') attaches middleware without changing
-existing message handlers and without starting another getUpdates consumer.
+install(dispatcher, '/etc/shortpost/telegram.json') registers panel callbacks and
+message middleware without starting another getUpdates consumer.
 """
 import asyncio,html,json,secrets,time
 from pathlib import Path
 from urllib.request import Request,urlopen
 from urllib.error import HTTPError,URLError
-from aiogram import BaseMiddleware,types
+from aiogram import BaseMiddleware,F,types
 
 class AdminExtension:
     def __init__(self,config):
@@ -294,7 +294,9 @@ def install(dispatcher,config_path='/etc/shortpost/telegram.json'):
     extension=AdminExtension(config)
     middleware=AdminMiddleware(extension)
     dispatcher.message.outer_middleware(middleware)
-    dispatcher.callback_query.outer_middleware(middleware)
+    # A real handler makes aiogram include callback_query in allowed_updates.
+    # Middleware alone is invisible to resolve_used_update_types().
+    dispatcher.callback_query.register(extension.callback,F.data.startswith('ap:'))
     dispatcher.startup.register(extension.startup)
     dispatcher.shutdown.register(extension.shutdown)
     return extension

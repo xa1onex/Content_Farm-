@@ -37,6 +37,40 @@ def test_install_does_not_add_polling_consumer(tmp_path):
     config=tmp_path/'telegram.json';config.write_text(json.dumps({'api_url':'http://127.0.0.1:8108','api_token':'test','allow_all':True}))
     dispatcher=Dispatcher();install(dispatcher,str(config))
     assert dispatcher.startup.handlers and dispatcher.shutdown.handlers
+    assert 'callback_query' in dispatcher.resolve_used_update_types()
+
+def test_panel_button_reaches_handler_through_dispatcher(tmp_path,monkeypatch):
+    from aiogram import Bot
+    config=tmp_path/'telegram.json';config.write_text(json.dumps({'allow_all':True}))
+    dispatcher=Dispatcher();install(dispatcher,str(config));answers=[];acks=[]
+    async def answer(self,text,**kwargs):answers.append(text)
+    async def ack(self,*args,**kwargs):acks.append(self.id)
+    monkeypatch.setattr(types.Message,'answer',answer)
+    monkeypatch.setattr(types.CallbackQuery,'answer',ack)
+    query=types.CallbackQuery(id='button-test',from_user=message().from_user,
+        chat_instance='private-chat',message=message(),data='ap:create')
+    async def run():
+        bot=Bot('123:test-token')
+        try:await dispatcher.feed_update(bot,types.Update(update_id=1,callback_query=query))
+        finally:await bot.session.close()
+    asyncio.run(run())
+    assert acks==['button-test'] and len(answers)==1
+    assert 'Пришли сюда ссылку' in answers[0]
+
+def test_panel_does_not_swallow_other_callback_handlers(tmp_path,monkeypatch):
+    from aiogram import Bot,F
+    config=tmp_path/'telegram.json';config.write_text(json.dumps({'allow_all':True}))
+    dispatcher=Dispatcher();install(dispatcher,str(config));seen=[]
+    async def legacy(query):seen.append(query.data)
+    dispatcher.callback_query.register(legacy,F.data=='legacy:ping')
+    query=types.CallbackQuery(id='legacy-test',from_user=message().from_user,
+        chat_instance='private-chat',message=message(),data='legacy:ping')
+    async def run():
+        bot=Bot('123:test-token')
+        try:await dispatcher.feed_update(bot,types.Update(update_id=2,callback_query=query))
+        finally:await bot.session.close()
+    asyncio.run(run())
+    assert seen==['legacy:ping']
 
 
 def test_panel_reports_readiness_without_raw_json(monkeypatch):
