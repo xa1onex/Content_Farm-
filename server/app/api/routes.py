@@ -349,10 +349,16 @@ def subscribe(data:SubscriptionIn,request:Request,s=DB,actor=ADMIN):
 def claim_notification(request:Request,s=DB,actor=ADMIN):
     from app.telegram_admin.notifications import enqueue
     enqueue()
-    delivery=s.scalar(select(NotificationDelivery).where(NotificationDelivery.status.in_(['pending','sending']),
-        NotificationDelivery.attempts<10,NotificationDelivery.next_at<=now()).order_by(NotificationDelivery.next_at)
-        .with_for_update(skip_locked=True).limit(1))
-    if not delivery:return {'delivery':None}
+    from app.telegram_admin.notifications import eligible
+    # Suppress stale deliveries at claim time as well as enqueue time.
+    for _ in range(100):
+        delivery=s.scalar(select(NotificationDelivery).where(NotificationDelivery.status.in_(['pending','sending']),
+            NotificationDelivery.attempts<10,NotificationDelivery.next_at<=now()).order_by(NotificationDelivery.next_at)
+            .with_for_update(skip_locked=True).limit(1))
+        if not delivery:return {'delivery':None}
+        if eligible(s,s.get(Event,delivery.event_id)):break
+        delivery.status='suppressed';s.flush()
+    else:return {'delivery':None}
     delivery.status='sending';delivery.attempts+=1;delivery.next_at=now()+timedelta(seconds=90)
     from app.telegram_admin.notifications import notification_text
     ev=s.get(Event,delivery.event_id)

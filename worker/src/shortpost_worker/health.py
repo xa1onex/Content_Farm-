@@ -18,7 +18,7 @@ from .platforms.profile import Profile
 def timestamp():return datetime.now(timezone.utc).isoformat()
 
 def network(adb, expected):
-    result={'at':timestamp(),'ready':False}
+    result={'at':timestamp(),'ready':False,'checked':False}
     if not expected:return result
     try:
         ipaddress.ip_address(expected)
@@ -42,13 +42,13 @@ def network(adb, expected):
                 if kind==0x0020 and size==8 and value[:2]==b'\x00\x01':
                     actual=str(ipaddress.ip_address(bytes(a^b for a,b in zip(value[4:8],request[4:8]))))
                     udp=actual==expected
-        result.update(tcp_verified=tcp,udp_verified=udp,ready=tcp and udp)
+        result.update(tcp_verified=tcp,udp_verified=udp,ready=tcp and udp,checked=True)
     except Exception:pass
     return result
 
 
 def device_health(config, device):
-    health={'at':timestamp(),'online':False,'identity_verified':False,'profiles':{},'network':{'at':timestamp(),'ready':False}}
+    health={'at':timestamp(),'online':False,'identity_verified':False,'identity_checked':False,'profiles':{},'network':{'at':timestamp(),'ready':False}}
     for platform,path in device.profiles.items():
         try:
             profile=Profile.load(path)
@@ -68,7 +68,9 @@ def device_health(config, device):
             command([config.adb_path,'disconnect',device.adb_endpoint],timeout=5)
             command([config.adb_path,'connect',device.adb_endpoint],timeout=8)
         health['online']=adb.run('get-state',timeout=4)=='device'
-        health['identity_verified']=health['online'] and adb.identity()==device.android_id
+        if health['online']:
+            health['identity_verified']=adb.identity()==device.android_id
+            health['identity_checked']=True
         if not health['identity_verified']:return health
         for platform,path in device.profiles.items():
             profile=Profile.load(path)

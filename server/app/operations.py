@@ -9,7 +9,8 @@ from app.errors import event
 
 LABELS = {
  'worker_offline': 'Нет связи с ПК', 'device_offline': 'Эмулятор недоступен',
- 'identity_mismatch': 'Изменился эмулятор: нужна проверка привязки',
+ 'identity_mismatch': 'Идентификатор эмулятора не совпадает с привязкой',
+ 'identity_unverified': 'Личность эмулятора пока не проверена',
  'proxy_unavailable': 'Прокси не прошёл проверку', 'proxy_unverified': 'Нет свежей проверки прокси',
  'profile_missing': 'Не настроен сценарий публикации', 'profile_unverified': 'Сценарий публикации ещё не проверен',
  'publishing_disabled': 'Публикации на ПК выключены', 'worker_paused': 'Автопостинг на ПК приостановлен',
@@ -42,12 +43,15 @@ def account_blockers(account, worker, device):
     if not device.enabled: reasons.append('device_disabled')
     health=device.capabilities.get('health', {})
     if not fresh(health.get('at')) or not health.get('online'): reasons.append('device_offline')
-    elif not health.get('identity_verified'): reasons.append('identity_mismatch')
+    elif not health.get('identity_verified'): reasons.append('identity_mismatch' if health.get('identity_checked') else 'identity_unverified')
     profiles=health.get('profiles', {})
     if account.platform not in profiles: reasons.append('profile_missing')
     elif not profiles[account.platform].get('verified'): reasons.append('profile_unverified')
     network=health.get('network', {})
-    if not fresh(network.get('at'),180): reasons.append('proxy_unverified')
+    if not health.get('online') or not health.get('identity_verified') or not fresh(health.get('at')):
+        reasons.append('proxy_unverified')
+    elif not fresh(network.get('at'),180) or (not network.get('ready') and not network.get('checked')):
+        reasons.append('proxy_unverified')
     elif not network.get('ready'): reasons.append('proxy_unavailable')
     return reasons
 
@@ -95,21 +99,47 @@ def overview(s):
       'jobs':counts,'published_24h':s.scalar(select(func.count()).select_from(Publication).where(Publication.published_at>=now()-timedelta(hours=24))),
       'problems':problems,'labels':LABELS}
 
-def monitor(s):
-    """One alert per outage, one recovery. Repeated heartbeats do not create new incidents."""
-    snapshot=overview(s)
-    current={}
+def incident_key(problem):
+    return problem['code']+':'+problem.get('account','system')
+
+SETUP_CODES={'account_paused','publishing_disabled','worker_not_running','profile_missing',
+    'profile_unverified','scheduler_paused','proxy_unverified','identity_unverified','worker_paused','device_disabled'}
+
+def alertable_problems(snapshot):
+    # A deliberately paused account/worker and cold serial devices are setup state.
+    accounts={a['username']:a for a in snapshot['accounts']}
+    result={}
     for problem in snapshot['problems']:
-        if problem['code'] in ('account_paused','publishing_disabled','worker_not_running','profile_missing','profile_unverified','scheduler_paused','proxy_unverified'):
-            continue  # Setup state stays in the dashboard, not repeated notifications.
-        key=problem['code']+':'+problem.get('account','system')
-        current[key]=problem
-    row=s.get(Setting,'operations_incidents')
-    previous=row.value if row else {}
+        if problem['code'] in SETUP_CODES:continue
+        if problem.get('account'):
+            account=accounts[problem['account']]
+            if not snapshot['scheduler']['enabled'] or set(account['reasons']) & {
+                'account_paused','worker_paused','publishing_disabled','worker_not_running','device_disabled'}:continue
+            if 'worker_offline' in account['reasons'] and problem['code']!='worker_offline':continue
+            # Loss of upstream connectivity does not prove identity or proxy failure.
+            if problem['code'] in {'identity_mismatch','proxy_unavailable'} and 'device_offline' in account['reasons']:continue
+        result[incident_key(problem)]=problem
+    return result
+
+def monitor(s):
+    """Persist outages for two minutes before alerting; disappearing evidence is not recovery."""
+    snapshot=overview(s);current=alertable_problems(snapshot)
+    row=s.get(Setting,'operations_incidents');previous=row.value if row else {}
+    history=s.get(Setting,'operations_alert_times');times=dict(history.value) if history else {}
+    tracked={};stamp=now().isoformat()
     for key,problem in current.items():
-        if key not in previous:
-            event(s,'system_problem','ops:'+uuid4().hex,problem)
-    for key,problem in previous.items():
-        if key not in current:event(s,'system_recovered','ops:'+uuid4().hex,problem,'info')
-    if row:row.value=current
-    else:s.add(Setting(key='operations_incidents',value=current))
+        prior=previous.get(key,{})
+        item=dict(problem,first_seen=prior.get('first_seen',stamp),alerted=prior.get('alerted',bool(prior)))
+        if not item['alerted'] and not fresh(item['first_seen'],119):
+            # Repeated network flaps produce at most one alert per incident per hour.
+            if not fresh(times.get(key),3600):
+                event(s,'system_problem','ops:'+uuid4().hex,problem)
+                times[key]=stamp
+            item['alerted']=True
+        tracked[key]=item
+    # No inferred green recovery: absence may mean offline, paused, or stale data.
+    # The dashboard shows the current verified state without another chat message.
+    if row:row.value=tracked
+    else:s.add(Setting(key='operations_incidents',value=tracked))
+    if history:history.value=times
+    else:s.add(Setting(key='operations_alert_times',value=times))

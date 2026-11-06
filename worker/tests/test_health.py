@@ -37,3 +37,13 @@ def test_tcp_and_udp_both_must_match_expected_exit(monkeypatch):
     adb=Mock();adb.shell.side_effect=[http.hex(),stun.hex()]
     result=network(adb,'203.0.113.9')
     assert result['ready'] and result['tcp_verified'] and result['udp_verified']
+
+def test_disconnected_device_does_not_claim_identity_or_proxy_failure(config,monkeypatch):
+    config.sequential_emulators=True;config.devices[0].adb_endpoint='127.0.0.1:16384'
+    def fail(*args,**kwargs):raise RuntimeError('boot in progress')
+    monkeypatch.setattr('shortpost_worker.health.ADB.run',fail)
+    monkeypatch.setattr('shortpost_worker.health.command',lambda *a,**kw:'')
+    probe=Mock();monkeypatch.setattr('shortpost_worker.health.network',probe)
+    report=device_health(config,config.devices[0])
+    assert not report['identity_checked'] and not report['identity_verified']
+    probe.assert_not_called()
