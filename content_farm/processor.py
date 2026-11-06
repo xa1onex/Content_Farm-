@@ -60,6 +60,7 @@ def validate_source(path):
 
 def download_youtube_video(url, job_dir):
     from yt_dlp import YoutubeDL
+    from yt_dlp.utils import DownloadError
     job_dir = Path(job_dir)
     def duration_filter(info, *, incomplete=False):
         if info.get('is_live'):
@@ -83,16 +84,27 @@ def download_youtube_video(url, job_dir):
     cookie_file = os.getenv('YOUTUBE_COOKIE_FILE')
     if cookie_file:
         options['cookiefile'] = str(BASE_DIR / cookie_file)
-    with YoutubeDL(options) as downloader:
-        info = downloader.extract_info(url, download=False)
-        if not info:raise ProcessingError('YouTube не вернул данные видео.')
-        reason=duration_filter(info)
-        if reason:raise ProcessingError(reason+f' Максимальная длительность: {MAX_SOURCE_SECONDS//3600} ч.')
-        # A long interview fits the input budget at a lower resolution.
-        if info.get('duration',0)>7200:downloader.params['format']='bestvideo[height<=480]+bestaudio/best[height<=480]/best'
-        info = downloader.extract_info(url, download=True)
-        if not info:
-            raise ProcessingError('YouTube не разрешил скачать это видео.')
+    try:
+        with YoutubeDL(options) as downloader:
+            info = downloader.extract_info(url, download=False)
+            if not info:raise ProcessingError('YouTube не вернул данные видео.')
+            reason=duration_filter(info)
+            if reason:raise ProcessingError(reason+f' Максимальная длительность: {MAX_SOURCE_SECONDS//3600} ч.')
+            # A long interview fits the input budget at a lower resolution.
+            if info.get('duration',0)>7200:downloader.params['format']='bestvideo[height<=480]+bestaudio/best[height<=480]/best'
+            info = downloader.extract_info(url, download=True)
+            if not info:
+                raise ProcessingError('YouTube не разрешил скачать это видео.')
+    except DownloadError as exc:
+        reason=str(exc).lower()
+        if 'not a bot' in reason or 'confirm you' in reason or 'http error 403' in reason:
+            if (BASE_DIR/'compute-connection.json').exists():
+                try:
+                    from source_pc import download_public_youtube
+                    return download_public_youtube(url,job_dir)
+                except Exception:log.warning('pc_source_download_unavailable')
+            raise ProcessingError('YouTube не разрешил скачать исходник и запросил подтверждение входа. Автоматическая загрузка сейчас недоступна; можно передать исходник через Google Диск.') from None
+        raise ProcessingError('Не удалось скачать исходник с YouTube. Проверь, что ссылка открывается и видео доступно для просмотра.') from None
     paths = [p for p in job_dir.glob('source.*') if p.stem=='source' and p.suffix in {'.mp4','.mkv','.webm','.mov'}]
     if len(paths) != 1:
         raise ProcessingError('YouTube не сохранил исходник. Возможно, выбранный файл превышает лимит 2 ГБ. Попробуй ссылку Google Диска или более короткое видео.')

@@ -79,6 +79,8 @@ def adaptive_weights(s,account):
     return {h:min(1.25,max(.75,v/max(1,baseline))) for h,v in valid.items()}
 
 def compatible(s,account,clip):
+    from app.content.moderation import blocked
+    if blocked(s,clip.id):return False
     if account.platform not in clip.platforms:return False
     for model,field in [(AccountCategory,'category_id'),(AccountTopic,'topic_id'),(AccountFormat,'format_id')]:
         allowed=list(s.scalars(select(getattr(model,field)).where(model.account_id==account.id)))
@@ -110,6 +112,7 @@ def create_job(s,account,clip,dt,parameters=None,plan_id=None,slot=None):
     from app.security import lock
     lock(s,'platform_clip:'+account.platform+':'+str(clip.id))
     from app.content.usage import used_on_platform
+    from app.content.moderation import rejected
     if s.scalar(select(Clip.id).where(Clip.id==clip.id,used_on_platform(account.platform))):
         raise HTTPException(409,'Clip permanently used on this platform')
     if s.scalar(select(Job.id).where(Job.clip_id==clip.id,Job.platform==account.platform).limit(1)):
@@ -179,7 +182,8 @@ def generate(s,day=None,account_ids=None):
             # Balance the number of previous assignments, then prefer older ready content.
             usage=select(func.count()).select_from(Job).where(Job.clip_id==Clip.id).correlate(Clip).scalar_subquery()
             from app.content.usage import used_on_platform
-            query=select(Clip).where(Clip.status=='ready',Clip.verified_at.is_not(None),Clip.id.not_in(used),~used_on_platform(account.platform))
+            from app.content.moderation import rejected
+            query=select(Clip).where(~rejected(),Clip.status=='ready',Clip.verified_at.is_not(None),Clip.id.not_in(used),~used_on_platform(account.platform))
             candidates=s.scalars(query.order_by(usage,Clip.created_at,Clip.id))
             clip=next((c for c in candidates if compatible(s,account,c)),None)
             if not clip:

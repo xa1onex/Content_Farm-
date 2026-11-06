@@ -44,3 +44,12 @@ class EditorialTests(unittest.TestCase):
    clips,passes=processor.analyze_candidates({},100,count=5)
   self.assertEqual(passes,2);self.assertEqual(len(clips),2)
   self.assertEqual(model.call_args.kwargs['count'],4);self.assertEqual(model.call_args.kwargs['excluded'],first)
+ def test_comment_button_is_on_second_row(self):
+  rows=bot.feedback_keyboard('CF-'+'A'*32).inline_keyboard
+  self.assertEqual([len(row) for row in rows],[2,1]);self.assertEqual(rows[1][0].text,'Комментарий')
+
+ def test_youtube_challenge_has_actionable_error(self):
+  from yt_dlp.utils import DownloadError
+  client=MagicMock();client.__enter__.return_value=client;client.extract_info.side_effect=DownloadError("Sign in to confirm you’re not a bot")
+  with tempfile.TemporaryDirectory() as d,patch('yt_dlp.YoutubeDL',return_value=client),patch.object(processor,'BASE_DIR',Path(d)):
+   with self.assertRaisesRegex(processor.ProcessingError,'подтверждение входа'):processor.download_youtube_video('https://youtu.be/abcdefghijk',Path(d))

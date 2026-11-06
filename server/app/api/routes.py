@@ -217,16 +217,28 @@ def progress_job(job_id:UUID,data:Progress,request:Request,s=DB,actor=WORKER):re
 @router.post('/jobs/{job_id}/result',response_model=ResultOut,response_model_exclude_none=True)
 @idempotent
 def result_job(job_id:UUID,data:Result,request:Request,s=DB,actor=WORKER):return queue.result(s,job_id,actor.worker_id,data)
+@router.post('/jobs/{job_id}/authorize-submit')
+def authorize_submit(job_id:UUID,data:LeaseEvent,request:Request,s=DB,actor=WORKER):
+    job=queue.fenced(s,job_id,actor.worker_id,data.lease_token)
+    from app.content.moderation import blocked
+    if blocked(s,job.clip_id):return {'allowed':False,'reason':'editorial_rejected'}
+    if job.status!='processing':raise HTTPException(409,'Processing lease required')
+    return {'allowed':True}
+
 @router.post('/jobs/{job_id}/media-ticket',response_model=MediaTicketOut,response_model_exclude_none=True)
 @idempotent
 def media_ticket(job_id:UUID,data:LeaseEvent,request:Request,s=DB,actor=WORKER):
     job=queue.fenced(s,job_id,actor.worker_id,data.lease_token)
+    from app.content.moderation import require_allowed
+    require_allowed(s,job.clip_id)
     return media.issue(job,actor.worker_id)
 @router.get('/jobs/{job_id}/video')
 def video(job_id:UUID,x_media_ticket:str=Header(),s=DB,actor=WORKER):
     job=require(s,Job,job_id)
     if job.worker_id!=actor.worker_id or job.status not in ('assigned','processing') or not job.lease_until or job.lease_until<=now():
         raise HTTPException(403,'Active lease required')
+    from app.content.moderation import require_allowed
+    require_allowed(s,job.clip_id)
     media.verify(x_media_ticket,job,actor.worker_id)
     info,chunks=drive.download(require(s,Clip,job.clip_id).drive_file_id)
     return StreamingResponse(chunks,media_type=info['mimeType'],headers={
@@ -257,6 +269,8 @@ def job_action(job_id:UUID,data:JobAction,request:Request,s=DB,actor=ADMIN):
     elif data.action=='cancel':job.status='cancelled'
     elif data.action=='pause':job.status='paused'
     elif data.action in ('retry','reschedule'):
+        from app.content.moderation import require_allowed
+        require_allowed(s,job.clip_id)
         if job.status=='failed' and not job.result.get('no_publish_attempted') and not job.result.get('operator_verified'):
             # Assigned lease expiry is safe; no ack was recorded.
             att=queue.attempt(s,job)

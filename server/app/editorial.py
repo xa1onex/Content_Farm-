@@ -67,6 +67,9 @@ def feedback_record(s,clip,user,data):
     value.update(data.model_dump(exclude_none=True));value['at']=now().isoformat()
     if row:row.value=value
     else:s.add(Setting(key=key,value=value))
+    s.flush()
+    from app.content.moderation import blocked,pause_waiting
+    if blocked(s,clip.id):pause_waiting(s,clip.id)
     return value
 @router.post('/api/v1/miniapp/content/{clip_id}/feedback')
 @idempotent

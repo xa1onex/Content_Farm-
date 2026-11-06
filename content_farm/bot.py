@@ -301,7 +301,7 @@ def feedback_keyboard(code,rating=0):
     if not code:return None
     return types.InlineKeyboardMarkup(inline_keyboard=[[
         types.InlineKeyboardButton(text='👍'+(' ✓' if rating==1 else ''),callback_data='fb:up:'+code),
-        types.InlineKeyboardButton(text='👎'+(' ✓' if rating==-1 else ''),callback_data='fb:down:'+code),
+        types.InlineKeyboardButton(text='👎'+(' ✓' if rating==-1 else ''),callback_data='fb:down:'+code)], [
         types.InlineKeyboardButton(text='Комментарий',callback_data='fb:comment:'+code)]])
 
 @dp.callback_query(F.data.startswith('fb:'))
@@ -317,7 +317,7 @@ async def feedback_click(query:types.CallbackQuery):
     rating=1 if action=='up' else -1
     result=await control.api('POST','/api/v1/telegram/editorial-feedback',{'passport':code,'user_id':query.from_user.id,'rating':rating})
     if 'error' in result:await query.answer('Не удалось сохранить оценку. Попробуй позже.',show_alert=True);return
-    await query.answer('Оценка сохранена. Учтём при следующем подборе.')
+    await query.answer('Дизлайк сохранён. Публикация запрещена.' if rating==-1 else 'Оценка сохранена. Учтём при следующем подборе.')
     try:await query.message.edit_reply_markup(reply_markup=feedback_keyboard(code,rating))
     except TelegramAPIError:pass
 

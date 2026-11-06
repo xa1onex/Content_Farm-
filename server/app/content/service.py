@@ -18,5 +18,7 @@ def register(s,data):
     return clip
 
 def ready(s,clip):
+    from app.content.moderation import require_allowed
+    require_allowed(s,clip.id)
     if clip.status!='ready' or clip.verified_at is None:
         raise HTTPException(409,'Clip must be verified in Google Drive and ready')

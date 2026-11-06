@@ -16,6 +16,7 @@ def worker_ready(worker):
 
 def claim(s,worker_id,job_id=None):
     from app.content.usage import used_on_platform
+    from app.content.moderation import rejected
     w=require(s,Worker,worker_id,locked=True)
     if not worker_ready(w):raise HTTPException(409,'Worker must be enabled and send a heartbeat')
     control=s.get(Setting,'scheduler')
@@ -28,7 +29,7 @@ def claim(s,worker_id,job_id=None):
         .where(Job.status.in_(['scheduled','retry_wait']),Job.scheduled_at<=now(),
             Job.attempts<Job.max_attempts,Account.status=='active',Account.worker_id==w.id,
             Device.worker_id==w.id,Device.enabled.is_(True),
-            Device.id.not_in(busy_devices),Clip.status=='ready',Clip.verified_at.is_not(None),~used_on_platform(Job.platform))
+            Device.id.not_in(busy_devices),~rejected(),Clip.status=='ready',Clip.verified_at.is_not(None),~used_on_platform(Job.platform))
         .order_by(Job.scheduled_at,Job.id).with_for_update(of=Job,skip_locked=True))
     if job_id is not None:q=q.where(Job.id==job_id)
     candidates=list(s.scalars(q.limit(100)))
@@ -94,6 +95,8 @@ def acknowledge(s,job_id,worker_id,data):
         return {'job_id':job.id,'status':job.status,'lease_expires_at':job.lease_until}
     fenced(s,job_id,worker_id,data.lease_token)
     if job.status!='assigned':raise HTTPException(409,'Only an assigned job can be acknowledged')
+    from app.content.moderation import require_allowed
+    require_allowed(s,job.clip_id)
     job.status='processing';job.processing_started_at=now()
     job.lease_until=now()+timedelta(seconds=settings().lease_seconds)
     attempt(s,job).status='processing'
@@ -105,6 +108,8 @@ def progress(s,job_id,worker_id,data):
         return {'job_id':job.id,'status':job.status,'lease_expires_at':job.lease_until}
     fenced(s,job_id,worker_id,data.lease_token)
     if job.status!='processing':raise HTTPException(409,'Acknowledge before processing')
+    from app.content.moderation import require_allowed
+    require_allowed(s,job.clip_id)
     deadline=job.processing_started_at+timedelta(seconds=settings().max_processing_seconds)
     if deadline<=now():raise HTTPException(409,'Maximum processing time reached; stop and reconcile')
     job.lease_until=min(now()+timedelta(seconds=settings().lease_seconds),deadline)
@@ -139,12 +144,13 @@ def result(s,job_id,worker_id,data):
         transient={'network_error','drive_unavailable','media_download_failed','rate_limited',
           'device_command_failed','adb_connect_timeout','mumu_boot_timeout','appium_unavailable','worker_restarted'}
         retry=data.error_code in transient and job.attempts<job.max_attempts
-        job.status='retry_wait' if retry else 'failed'
+        editorial=data.error_code=='editorial_rejected'
+        job.status='paused' if editorial else 'retry_wait' if retry else 'failed'
         job.lease_until=None;pub_id=None
         if retry:job.scheduled_at=now()+timedelta(seconds=min(600,60*2**job.attempts))
         if data.error_code in ('captcha','platform_block','login_required'):
             require(s,Account,job.account_id,locked=True).status='attention'
-        if not retry:event(s,'publication_failed',f'failed:{job.id}:{job.attempts}',
+        if not retry and not editorial:event(s,'publication_failed',f'failed:{job.id}:{job.attempts}',
             {'job_id':str(job.id),'code':data.error_code})
     else:
         job.status='unknown';job.lease_until=None;pub_id=None

@@ -70,12 +70,13 @@ def overview(s):
           'operational_started_at':account.operational_started_at.isoformat() if account.operational_started_at else None,
           'ready':not reasons,'reasons':reasons,'device':devices[account.device_id].name if account.device_id in devices else None})
     counts={str(status):count for status,count in s.execute(select(Job.status,func.count()).group_by(Job.status))}
-    ready=s.scalar(select(func.count()).select_from(Clip).where(Clip.status=='ready',Clip.verified_at.is_not(None)))
+    from app.content.moderation import rejected
+    ready=s.scalar(select(func.count()).select_from(Clip).where(~rejected(),Clip.status=='ready',Clip.verified_at.is_not(None)))
     available={}
     for platform in ('instagram','tiktok','youtube'):
         from app.content.usage import used_on_platform
         reserved=select(Job.clip_id).where(Job.platform==platform)
-        available[platform]=s.scalar(select(func.count()).select_from(Clip).where(Clip.status=='ready',Clip.verified_at.is_not(None),Clip.platforms.contains([platform]),Clip.id.not_in(reserved),~used_on_platform(platform)))
+        available[platform]=s.scalar(select(func.count()).select_from(Clip).where(~rejected(),Clip.status=='ready',Clip.verified_at.is_not(None),Clip.platforms.contains([platform]),Clip.id.not_in(reserved),~used_on_platform(platform)))
     farm=s.get(Setting,'farm_heartbeat')
     farm_data=dict(farm.value) if farm else {}
     farm_data['online']=fresh(farm_data.get('at'),180)

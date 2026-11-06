@@ -32,6 +32,7 @@ class Backend:
             self.status='processing';result={'job_id':self.assignment['job']['id'],'status':'processing','lease_expires_at':(datetime.now(timezone.utc)+timedelta(seconds=180)).isoformat()}
         elif path.endswith('/media-ticket'):result={'url':str(request.url).rsplit('/',1)[0]+'/video','ticket':'private-ticket','expires_at_unix':time.time()+180}
         elif path.endswith('/video'):return httpx.Response(200,content=b'test-video',headers={'Content-Type':'video/mp4','Content-Length':'10'})
+        elif path.endswith('/authorize-submit'):result={'allowed':True}
         elif path.endswith('/progress'):result={'job_id':self.assignment['job']['id'],'status':'processing','lease_expires_at':(datetime.now(timezone.utc)+timedelta(seconds=180)).isoformat()}
         elif path.endswith('/result'):
             self.results.append(body);self.status='published' if body['outcome']=='published' else ('unknown' if body['outcome']=='unknown' else 'failed')
@@ -219,4 +220,21 @@ async def test_same_emulator_lock_includes_session_cleanup(config,journal,assign
     try:
         await asyncio.gather(engine.process(assignment),engine.process(second))
         assert active['max']==1 and active['count']==0 and len(clicks)==2
+    finally:await api.close()
+
+@pytest.mark.asyncio
+async def test_revoked_submit_permission_never_clicks_publish(config,journal,assignment,monkeypatch):
+    backend,api,engine,clicks=setup(config,journal,assignment,monkeypatch)
+    async def deny(*args,**kwargs):
+        from shortpost_worker.errors import WorkerError
+        raise WorkerError('editorial_rejected',status=409)
+    original=api.mutate
+    async def mutate(kind,*args,**kwargs):
+        if kind=='authorize-submit':return await deny()
+        return await original(kind,*args,**kwargs)
+    monkeypatch.setattr(api,'mutate',mutate)
+    try:
+        await engine.process(assignment)
+        assert clicks==[] and backend.results[0]['outcome']=='safe_failure'
+        assert journal.jobs()[0]['irreversible_at'] is None
     finally:await api.close()
