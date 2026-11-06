@@ -80,7 +80,11 @@ def device_health(config, device):
             command([config.adb_path,'connect',device.adb_endpoint],timeout=8)
         health['online']=adb.run('get-state',timeout=4)=='device'
         if health['online']:
-            health['identity_verified']=adb.identity()==device.android_id
+            try:identity=adb.identity()
+            except Exception:
+                # ADB can cache `device` after shutdown. A shell reply is required.
+                health['online']=False;return health
+            health['identity_verified']=identity==device.android_id
             health['identity_checked']=True
         if not health['identity_verified']:return health
         for platform,path in device.profiles.items():

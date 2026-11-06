@@ -253,3 +253,17 @@ async def test_closed_uncertain_history_reconciles_without_repeating_any_click(c
         await engine.recover()
         assert clicks==[] and journal.jobs()[0]['stage']=='reconciled'
     finally:await api.close()
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('sequential',[False,True])
+async def test_health_reconnects_respect_the_sequential_ui_lock(config,journal,assignment,monkeypatch,sequential):
+    backend,api,engine,clicks=setup(config,journal,assignment,monkeypatch);config.sequential_emulators=sequential
+    async def probe(*args):
+        assert engine.emulator_lock.locked()==sequential
+        engine.stopping=True
+        return {'online':False}
+    async def no_sleep(*args):pass
+    monkeypatch.setattr('shortpost_worker.engine.asyncio.to_thread',probe)
+    monkeypatch.setattr('shortpost_worker.engine.asyncio.sleep',no_sleep)
+    try:await engine.health_loop()
+    finally:await api.close()

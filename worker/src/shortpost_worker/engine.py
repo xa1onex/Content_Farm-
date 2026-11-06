@@ -216,10 +216,15 @@ class Engine:
           'paused':self.journal.control('paused')=='1','sequential_emulators':self.config.sequential_emulators}})
     async def health_loop(self):
         from .health import device_health
-        while not self.stopping:
+        async def probe():
             enabled=[d for d in self.config.devices if d.enabled]
             results=await asyncio.gather(*(asyncio.to_thread(device_health,self.config,d) for d in enabled),return_exceptions=True)
             self.device_health={d.external_id:(value if isinstance(value,dict) else {}) for d,value in zip(enabled,results)}
+        while not self.stopping:
+            if self.config.sequential_emulators:
+                # Health reconnects must never interrupt a boot, UI session or publication.
+                async with self.emulator_lock:await probe()
+            else:await probe()
             await asyncio.sleep(60)
     async def heartbeat_loop(self):
         while not self.stopping:

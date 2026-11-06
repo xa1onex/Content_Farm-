@@ -57,3 +57,10 @@ def test_http_connect_requires_tcp_match_and_blocked_udp():
     report=network(adb,'203.0.113.9','http');assert report['ready'] and report['udp_blocked']
     adb.shell.side_effect=[(b'HTTP/1.1 200 OK\r\nContent-Length: 11\r\n\r\n203.0.113.8').hex(),'']
     assert not network(adb,'203.0.113.9','http')['ready']
+
+def test_cached_adb_transport_is_not_live_without_a_shell_reply(config,monkeypatch):
+    config.devices[0].adb_endpoint='127.0.0.1:16384'
+    monkeypatch.setattr('shortpost_worker.health.ADB.run',lambda *a,**kw:'device')
+    def disconnected(*args):raise RuntimeError('closed transport')
+    monkeypatch.setattr('shortpost_worker.health.ADB.identity',disconnected)
+    r=device_health(config,config.devices[0]);assert not r['online'] and not r['identity_checked']
