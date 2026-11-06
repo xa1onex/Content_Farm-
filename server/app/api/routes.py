@@ -169,6 +169,31 @@ def add_job(data:JobIn,request:Request,s=DB,actor=ADMIN):
     account=require(s,Account,data.account_id,locked=True)
     if data.scheduled_at<now()-timedelta(minutes=1):raise HTTPException(422,'Cannot schedule in the past')
     return record(scheduler.create_job(s,account,require(s,Clip,data.clip_id),data.scheduled_at,data.parameters))
+@router.get('/workers/me/next-device')
+def next_device(s=DB,actor=WORKER):
+    # Read-only wake hint. Claim still enforces readiness, leases and all limits.
+    from app.content.usage import used_on_platform
+    from app.dispatcher.service import ACTIVE,worker_ready
+    w=require(s,Worker,actor.worker_id)
+    control=s.get(Setting,'scheduler')
+    if not worker_ready(w) or (control and not control.value.get('enabled',True)):
+        return {'job_id':None}
+    if s.scalar(select(Job.id).where(Job.worker_id==w.id,Job.status.in_(ACTIVE)).limit(1)):
+        return {'job_id':None}
+    q=(select(Job,Device).join(Account,Account.id==Job.account_id).join(Device,Device.id==Account.device_id)
+       .join(Clip,Clip.id==Job.clip_id).where(Job.status.in_(['scheduled','retry_wait']),Job.scheduled_at<=now(),
+       Job.attempts<Job.max_attempts,Account.status=='active',Account.worker_id==w.id,
+       Device.worker_id==w.id,Device.enabled.is_(True),Clip.status=='ready',Clip.verified_at.is_not(None),
+       ~used_on_platform(Job.platform)).order_by(Job.scheduled_at,Job.id).limit(100))
+    from app.scheduler.service import enforce_execution_limits,compatible
+    from zoneinfo import ZoneInfo
+    for job,device in s.execute(q):
+        account=s.get(Account,job.account_id)
+        if job.local_date!=now().astimezone(ZoneInfo(account.timezone)).date():continue
+        if compatible(s,account,s.get(Clip,job.clip_id)) and enforce_execution_limits(s,account,job):
+            return {'job_id':str(job.id),'external_id':device.external_id}
+    return {'job_id':None}
+
 @router.post('/jobs/claim',response_model=AssignmentOut,response_model_exclude_none=True)
 @idempotent
 def claim_job(request:Request,data:ClaimInput|None=None,s=DB,actor=WORKER):
@@ -378,6 +403,7 @@ def rotate_worker_token(worker_id:UUID,request:Request,s=DB,actor=ADMIN):
 
 class FarmHeartbeat(Input):
     counts:dict[str,int]
+    jobs:list[dict] = []
     active:list[dict] = []
     drive:dict = {}
     disk_free_gb:float

@@ -34,6 +34,8 @@ app=FastAPI(title='Autopost Server',version='1.0.0',lifespan=lifespan,
 app.include_router(router)
 from app.miniapp import router as miniapp_router
 app.include_router(miniapp_router)
+from app.editorial import router as editorial_router
+app.include_router(editorial_router)
 
 @app.middleware('http')
 async def request_context(request:Request,call_next):

@@ -212,10 +212,11 @@ class AdminExtension:
                 if item:
                     message=types.Message(message_id=0,date=int(time.time()),chat=types.Chat(id=item['user_id'],type='private'),
                         from_user=types.User(id=item['user_id'],is_bot=False,first_name='Пользователь'),text=item['url']).as_(bot)
-                    response=await self.source_handler(message,bot,request_id=item['id'])
+                    try:response=await self.source_handler(message,bot,request_id=item['id'],clip_count=item.get('clip_count'),parent_job_id=item.get('parent_job_id'),retry_job_id=item.get('retry_job_id'))
+                    except ValueError as exc:response={'error':str(exc)}
                     await self.api('POST','/api/v1/telegram/farm-requests/'+item['id']+'/result',
                         {'lease':item['lease'],'job_id':response.get('job_id') if response else None,
-                         'error':None if response and response.get('job_id') else 'Не удалось создать задание. Подробности в чате бота.'})
+                         'error':None if response and response.get('job_id') else response.get('error','Не удалось создать задание. Подробности в чате бота.')})
             except Exception:
                 import logging
                 logging.getLogger(__name__).warning('miniapp_source_delivery_retry')

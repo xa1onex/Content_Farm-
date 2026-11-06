@@ -2,6 +2,9 @@ api_url = "https://origin.xdoublegroup.online:8443/api/v1"
 # The UUID returned by the server administrator when creating this Worker.
 worker_id = "00000000-0000-4000-8000-000000000000"
 max_parallel = 1
+# Optional: sequential MuMu lifecycle; requires mumu_manager and an explicit managed list.
+sequential_emulators = false
+managed_instance_indices = []
 allow_publish = false
 adb_path = "adb"
 ffprobe_path = "ffprobe"

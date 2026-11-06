@@ -37,6 +37,7 @@ class Engine:
         self.publisher_factory=publisher_factory;self.session_factory=session_factory
         self.tasks=set();self.stopping=False;self.executing=set()
         self.device_health={};self.live=False
+        self.emulator_lock=asyncio.Lock()
         self.media_dir=config.state_dir/'media';self.media_dir.mkdir(parents=True,exist_ok=True)
     async def renew(self,assignment,guard):
         pending=None
@@ -149,6 +150,9 @@ class Engine:
             local.unlink(missing_ok=True)
             if locked:device_lock.release()
             self.executing.discard((identifier,attempt))
+            if self.config.sequential_emulators and locked:
+                try:await asyncio.to_thread(self.devices.finish,device)
+                except WorkerError as exc:log.warning('emulator_finish_error code=%s',exc.code)
     async def recover(self,exclude=None):
         # Reconcile a lost claim response first; finish() atomically imports assignments.
         for op in self.journal.pending('claim'):
@@ -213,7 +217,11 @@ class Engine:
             await asyncio.sleep(30)
     async def analytics_loop(self):
         while not self.stopping:
-            try:await self.collect_due_metrics()
+            try:
+                if self.config.sequential_emulators:
+                    if not self.emulator_lock.locked():
+                        async with self.emulator_lock:await self.collect_due_metrics()
+                else:await self.collect_due_metrics()
             except WorkerError as exc:log.warning('metrics_error code=%s',exc.code)
             await asyncio.sleep(60)
     async def collect_due_metrics(self):
@@ -233,13 +241,16 @@ class Engine:
             external=assignment.device.external_id
             if external in self.journal.blocked_devices():continue
             device=self.devices.configured(external)
+            if self.config.sequential_emulators:
+                # Metrics must not wake a second emulator or disturb publication UI.
+                if not self.device_health.get(external,{}).get('online'):continue
             lock=self.devices.locks[external]
             if lock.locked():continue
             async with lock:
                 session=None
                 try:
                     guard=ReadGuard(self.api)
-                    adb=await asyncio.to_thread(self.devices.connect,device,guard)
+                    adb=await asyncio.to_thread(self.devices.connect,device,guard,**({'start':False} if self.config.sequential_emulators else {}))
                     session=self.session_factory(device,adb.serial);driver=await asyncio.to_thread(session.open)
                     publisher=self.platform(assignment,device,driver,adb,guard)
                     metrics=await asyncio.to_thread(publisher.collect_metrics,assignment,task['external_id'],task['url'])
@@ -281,6 +292,15 @@ class Engine:
         completed=next((r for r in self.journal.jobs() if r['job_id']==str(job_id) and r['stage']=='published'),None)
         if completed:return {'job_id':str(job_id),'status':'published','publication_id':completed['publication_id'],'already_completed':True}
         if not self.devices.resources_ok():raise WorkerError('resources_unavailable')
+        if self.config.sequential_emulators:
+            hint=await self.api.get('/workers/me/next-device')
+            if str(hint.get('job_id'))!=str(job_id):raise WorkerError('requested_job_not_available')
+            device=self.devices.configured(hint['external_id'])
+            await asyncio.to_thread(self.devices.exclusive,device)
+            await asyncio.to_thread(self.devices.connect,device,ReadGuard(self.api,180))
+            from .health import device_health
+            self.device_health[device.external_id]=await asyncio.to_thread(device_health,self.config,device)
+            await self.send_heartbeat()
         response=await self.api.claim(job_id)
         if not response.get('job'):raise WorkerError('requested_job_not_available')
         assignment=Assignment.model_validate(response)
@@ -296,6 +316,26 @@ class Engine:
             self.stopping=True;heartbeat.cancel()
             try:await heartbeat
             except asyncio.CancelledError:pass
+
+    async def claim_sequential(self):
+        from .health import device_health
+        if self.journal.jobs(unfinished=True):raise WorkerError('unfinished_jobs_block_switch')
+        planned=await self.api.get('/workers/me/next-device')
+        if not planned.get('job_id'):
+            await asyncio.sleep(15);return {'job':None}
+        device=self.devices.configured(planned['external_id'])
+        await asyncio.to_thread(self.devices.exclusive,device)
+        try:
+            await asyncio.to_thread(self.devices.connect,device,ReadGuard(self.api,180))
+            self.device_health[device.external_id]=await asyncio.to_thread(device_health,self.config,device)
+            await self.send_heartbeat()
+            if self.journal.control('paused')=='1' or self.journal.control('stop')=='1':return {'job':None}
+            response=await self.api.claim(planned['job_id'])
+            if response.get('job'):return response
+            return {'job':None}
+        finally:
+            # Claimed assignments remain in the durable journal and block shutdown.
+            if not self.journal.jobs(unfinished=True):await asyncio.to_thread(self.devices.finish,device)
 
     async def run(self,live=False):
         if live:
@@ -332,6 +372,11 @@ class Engine:
                     if blocked:
                         await asyncio.sleep(5);continue
                     try:
+                        if self.config.sequential_emulators:
+                            async with self.emulator_lock:
+                                response=await self.claim_sequential()
+                                if response.get('job'):await self.process(response)
+                            continue
                         response=await self.api.claim()
                         if response.get('job'):
                             assignment=Assignment.model_validate(response)

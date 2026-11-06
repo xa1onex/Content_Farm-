@@ -125,3 +125,19 @@ def test_temporary_failure_before_publish_retries_same_job_with_new_lease(seeded
     with transaction() as s:
         assignment=claim(s,seeded['worker'])
         assert assignment['job']['id']==seeded['job'] and assignment['lease_token']!=raw
+
+def test_next_device_hint_is_read_only_and_claim_remains_fenced(client,seeded):
+    from conftest import auth
+    from app.models import Setting
+    r=client.get('/api/v1/workers/me/next-device',headers=auth('worker'))
+    assert r.status_code==200 and r.json()['job_id']==str(seeded['job'])
+    with transaction() as s:
+        job=s.get(Job,seeded['job']);assert job.status=='scheduled' and job.attempts==0 and job.lease_hash is None
+        # Stale schedule must not be changed by the read-only hint.
+        job.local_date=now().date()-timedelta(days=1)
+    assert client.get('/api/v1/workers/me/next-device',headers=auth('worker')).json()=={'job_id':None}
+    with transaction() as s:
+        assert s.get(Job,seeded['job']).status=='scheduled'
+        s.add(Setting(key='scheduler',value={'enabled':False}))
+    assert client.get('/api/v1/workers/me/next-device',headers=auth('worker')).json()=={'job_id':None}
+    assert client.get('/api/v1/workers/me/next-device',headers=auth('worker2')).json()=={'job_id':None}

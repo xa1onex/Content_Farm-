@@ -17,7 +17,7 @@ if VIDEO_LAYOUT not in {'portrait', 'split'}:
     raise ValueError('VIDEO_LAYOUT must be portrait or split')
 GEMINI_MODEL = 'gemini-3.5-flash'
 WHISPER_MODEL = 'base'
-MAX_SOURCE_SECONDS = int(os.getenv('MAX_SOURCE_SECONDS', '7200'))
+MAX_SOURCE_SECONDS = int(os.getenv('MAX_SOURCE_SECONDS', '21600'))
 MAX_INPUT_BYTES = int(os.getenv('MAX_INPUT_BYTES', str(2 * 1024**3)))
 MAX_QUEUE_SIZE = int(os.getenv('MAX_QUEUE_SIZE', '10'))
 FFMPEG_THREADS = int(os.getenv('FFMPEG_THREADS', '2'))
@@ -35,3 +35,6 @@ AUTOPOST_API_URL = os.getenv('AUTOPOST_API_URL', 'https://origin.xdoublegroup.on
 AUTOPOST_TOKEN_FILE = path_setting('AUTOPOST_TOKEN_FILE', 'autopost_credentials.json')
 AUTOPOST_CATEGORY_ID = os.getenv('AUTOPOST_CATEGORY_ID', '').strip()
 AUTOPOST_FORMAT_ID = os.getenv('AUTOPOST_FORMAT_ID', '').strip()
+
+MAX_USER_JOBS = int(os.getenv("MAX_USER_JOBS", "10"))
+MAX_CLIPS = 20

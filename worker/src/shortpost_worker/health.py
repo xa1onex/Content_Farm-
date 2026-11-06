@@ -61,7 +61,7 @@ def device_health(config, device):
         try:online=adb.run('get-state',timeout=4)=='device'
         except Exception:online=False
         if not online:
-            if config.mumu_manager and time.monotonic()-_restarts.get(device.external_id,-1000)>300:
+            if not getattr(config,'sequential_emulators',False) and config.mumu_manager and time.monotonic()-_restarts.get(device.external_id,-1000)>300:
                 _restarts[device.external_id]=time.monotonic()
                 manager=MuMu(config.mumu_manager)
                 if not manager.info(device.instance_index).get('is_android_started'):manager.launch(device.instance_index)

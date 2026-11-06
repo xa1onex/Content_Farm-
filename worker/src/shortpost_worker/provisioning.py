@@ -148,6 +148,7 @@ def prepare_devices(config, journal, *, external_id=None, check_only=False, stop
                 raise WorkerError('preparation_stopped')
             if not devices.resources_ok():
                 raise WorkerError('insufficient_resources')
+            if config.sequential_emulators:devices.exclusive(device)
             adb = devices.connect(device, PreparationGuard(config.play_install_timeout_seconds + 120))
             session = Session(device, adb.serial)
             driver = session.open()
@@ -170,6 +171,9 @@ def prepare_devices(config, journal, *, external_id=None, check_only=False, stop
         finally:
             if session:
                 session.close()
+            if config.sequential_emulators:
+                try:devices.finish(device)
+                except WorkerError:item['error']='emulator_shutdown_failed';item['ready']=False
             save()
     print('Preparation report:', target)
     return report

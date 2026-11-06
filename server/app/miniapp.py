@@ -77,24 +77,23 @@ def state(s=DB,actor=ADMIN):
         requests=[dict(v.value,id=v.key.split(':')[-1]) for v in s.scalars(select(Setting).where(Setting.key.like('miniapp_farm:%'))) if v.value.get('user_id')==uid]
         data['requests']=sorted(requests,key=lambda v:v['created_at'])[-20:]
     else:data['requests']=[]
+    heartbeat_jobs=data['farm'].pop('jobs',[])
+    user=int(str(actor.id).split(':')[1]) if str(actor.id).startswith('telegram:') else None
+    preflight=s.get(Setting,'mass_test_preflight')
+    data['preflight']=preflight.value if preflight else None
+    data['farm_jobs']=[j for j in heartbeat_jobs if user is None or j.get('user_id')==user]
+    data['feedback']=[v.value for v in s.scalars(select(Setting).where(Setting.key.like('editorial_feedback:%'))) if v.value.get('user_id')==user]
     return data
 
 class SourceInput(BaseModel):
     url:str=Field(min_length=10,max_length=2048)
+    clip_count:int|None=Field(default=None,ge=1,le=20)
 
 @router.post('/api/v1/miniapp/farm',status_code=201)
 @idempotent
 def farm_request(data:SourceInput,request:Request,s=DB,actor=ADMIN):
-    if not str(actor.id).startswith('telegram:'):raise HTTPException(403,'Открой форму через Telegram')
-    uid=int(str(actor.id).split(':')[1]);url=urlsplit(data.url.strip())
-    if url.scheme!='https' or url.username or url.password or url.hostname not in ('youtube.com','www.youtube.com','m.youtube.com','youtu.be','drive.google.com'):
-        raise HTTPException(422,'Нужна ссылка YouTube или Google Диска')
-    lock(s,'miniapp-farm:'+str(uid))
-    rows=list(s.scalars(select(Setting).where(Setting.key.like('miniapp_farm:%'))))
-    if any(v.value.get('user_id')==uid and v.value.get('status') in ('pending','leased') for v in rows):raise HTTPException(409,'Предыдущая ссылка уже передаётся в обработку')
-    identifier=str(uuid.uuid4());value={'user_id':uid,'url':data.url.strip(),'status':'pending','created_at':now().isoformat(),'attempts':0}
-    s.add(Setting(key='miniapp_farm:'+identifier,value=value))
-    return {'id':identifier,'status':'pending'}
+    from app.editorial import queue_requests,uid
+    return queue_requests(s,uid(actor),[data.url],data.clip_count)[0]
 
 @router.post('/api/v1/telegram/farm-requests/claim')
 @idempotent

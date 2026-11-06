@@ -10,16 +10,16 @@ from pathlib import Path
 import time
 import uuid
 
-from aiogram import Bot, Dispatcher, BaseMiddleware, types
+from aiogram import Bot, Dispatcher, BaseMiddleware, types, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramAPIError, TelegramRetryAfter
 from aiogram.filters import Command, CommandStart
 from aiogram.types import FSInputFile
 
-from config import BASE_DIR, JOB_DIR, MAX_QUEUE_SIZE, TELEGRAM_INPUT_BYTES, AUTOPOST_ENABLED
+from config import BASE_DIR, JOB_DIR, MAX_QUEUE_SIZE, TELEGRAM_INPUT_BYTES, AUTOPOST_ENABLED, MAX_USER_JOBS
 from drive_helper import archive_job, save_private_json
-from processor import process_job, ProcessingError, TransientProcessingError
+from processor import process_job, ProcessingError, TransientProcessingError, NoMoreMoments
 from autopost import register_job
 from sources import parse_source
 from operations import recovery_changes, report_loop
@@ -116,7 +116,7 @@ async def deliver(bot, job_dir):
             for attempt in range(3):
                 try:
                     sent = await bot.send_video(state['chat_id'],FSInputFile(local),
-                        caption=caption,supports_streaming=True,width=1080,height=1920,
+                        caption=caption,reply_markup=feedback_keyboard(clip.get('id')),supports_streaming=True,width=1080,height=1920,
                         duration=round(clip['end_time']-clip['start_time']),request_timeout=300)
                     state.setdefault('telegram_files',{})[clip['file']] = sent.video.file_id
                     delivered.add(clip['file'])
@@ -204,6 +204,10 @@ async def worker(bot):
         except asyncio.CancelledError:
             update_state(job_dir,status='interrupted')
             raise
+        except NoMoreMoments as exc:
+            reporter.done=True
+            update_state(job_dir,status='exhausted',stage='Новых моментов не найдено',error_message=str(exc))
+            await reporter.edit(html.escape(str(exc)),final=True)
         except TransientProcessingError as exc:
             count = state.get('auto_retry_count',0)+1
             reporter.done = True
@@ -221,7 +225,7 @@ async def worker(bot):
             if (job_dir/'manifest.json').exists():
                 state=update_state(job_dir,error=type(exc).__name__,**recovery_changes(load_state(job_dir)))
             else:
-                state=update_state(job_dir,status='failed',error=type(exc).__name__)
+                state=update_state(job_dir,status='failed',error=type(exc).__name__,error_message=str(exc)[:500] if isinstance(exc,(ProcessingError,ValueError)) else 'Ошибка обработки')
             reporter.done = True
             message = str(exc) if isinstance(exc,(ProcessingError,ValueError)) else 'Не удалось обработать видео. Подробности сохранены в журнале.'
             error_text = ('⏳ Ролики сохранены. Повторю доставку автоматически.' if state['status']=='retry_wait' else f'❌ {html.escape(message)}\nПовторить: /retry {state["id"]}')
@@ -279,7 +283,7 @@ async def retry(message:types.Message):
         if not (job_dir/'state.json').exists() or load_state(job_dir).get('user_id')!=message.from_user.id:
             await message.answer('Твоё задание с таким ID не найдено.')
             return
-        if message.from_user.id in busy_users or parts[1] in scheduled:
+        if parts[1] in scheduled:
             await message.answer('Твоё задание уже в очереди или обрабатывается.')
             return
         if queue.full():
@@ -293,27 +297,76 @@ async def retry(message:types.Message):
         queue.put_nowait(job_dir)
         await message.answer(f'Задание <code>{parts[1]}</code> добавлено в очередь.')
 
-@dp.message()
-async def submit(message:types.Message,bot:Bot,request_id=None):
+def feedback_keyboard(code,rating=0):
+    if not code:return None
+    return types.InlineKeyboardMarkup(inline_keyboard=[[
+        types.InlineKeyboardButton(text='👍'+(' ✓' if rating==1 else ''),callback_data='fb:up:'+code),
+        types.InlineKeyboardButton(text='👎'+(' ✓' if rating==-1 else ''),callback_data='fb:down:'+code),
+        types.InlineKeyboardButton(text='Комментарий',callback_data='fb:comment:'+code)]])
+
+@dp.callback_query(F.data.startswith('fb:'))
+async def feedback_click(query:types.CallbackQuery):
+    if not control or not query.message or not control.allowed(query):await query.answer();return
+    _,action,code=query.data.split(':',2)
+    if action not in ('up','down','comment'):await query.answer();return
+    if not __import__('re').fullmatch(r'CF-[A-F0-9]{32}',code):await query.answer('Ролик не найден');return
+    if action=='comment':
+        await query.answer()
+        await query.message.answer('Комментарий к ролику '+code+'\nЧто понравилось или что улучшить? Ответь на это сообщение.',reply_markup=types.ForceReply(selective=True))
+        return
+    rating=1 if action=='up' else -1
+    result=await control.api('POST','/api/v1/telegram/editorial-feedback',{'passport':code,'user_id':query.from_user.id,'rating':rating})
+    if 'error' in result:await query.answer('Не удалось сохранить оценку. Попробуй позже.',show_alert=True);return
+    await query.answer('Оценка сохранена. Учтём при следующем подборе.')
+    try:await query.message.edit_reply_markup(reply_markup=feedback_keyboard(code,rating))
+    except TelegramAPIError:pass
+
+@dp.message(F.reply_to_message,F.text)
+async def feedback_reply(message:types.Message,bot:Bot):
+    original=message.reply_to_message
+    code=__import__('re').search(r'CF-[A-F0-9]{32}',(original.caption or '')+' '+(original.text or ''))
+    if not control or not control.allowed(message) or not code or not original.from_user or original.from_user.id!=bot.id:
+        return await handle_source(message,bot)
+    result=await control.api('POST','/api/v1/telegram/editorial-feedback',{'passport':code.group(),'user_id':message.from_user.id,'comment':message.text[:1000]})
+    await message.answer('Комментарий сохранён. Он будет учтён при следующем подборе моментов и описаний.' if 'error' not in result else 'Не удалось сохранить комментарий. Попробуй позже.')
+
+async def submit(message:types.Message,bot:Bot,request_id=None,clip_count=None,parent_job_id=None,retry_job_id=None,quiet=False):
     if not message.from_user or message.chat.type!='private':
         await message.answer('Отправь видео в личный чат с ботом.')
         return
+    from sources import URL_PATTERN
+    urls=URL_PATTERN.findall(message.text or '')
+    if len(urls)>1 and not request_id:
+        if len(urls)>10:await message.answer('За раз можно отправить до 10 ссылок.');return
+        for url in urls:parse_source(url)
+        accepted=[]
+        for url in dict.fromkeys(urls):
+            item=await submit(message.model_copy(update={'text':url}),bot,clip_count=clip_count,quiet=True)
+            if item:accepted.append(item['job_id'])
+        await message.answer(f'Принято заданий: {len(accepted)}. Выполняются по очереди; ход работы — в панели «Создать».')
+        return {'jobs':accepted}
     async with user_locks[message.from_user.id]:
         requested_id=uuid.UUID(request_id).hex[:12] if request_id else None
         if requested_id and (JOB_DIR/requested_id/'state.json').exists():
             previous=load_state(JOB_DIR/requested_id)
             if previous.get('miniapp_request_id')!=request_id or previous['user_id']!=message.from_user.id:raise RuntimeError('Request identity conflict')
             return {'job_id':requested_id,'status':previous['status']}
-        if message.from_user.id in busy_users:
-            await message.answer('У тебя уже есть задание в очереди или обработке. Посмотреть: /status')
-            return
-        if queue.full():
-            await message.answer('Очередь заполнена. Попробуй позже.')
-            return
-        cooldown = 60-(time.monotonic()-last_submit.get(message.from_user.id,0))
-        if cooldown>0:
-            await message.answer(f'Следующее задание можно отправить через {math_ceil(cooldown)} сек.')
-            return
+        if retry_job_id:
+            path=JOB_DIR/retry_job_id
+            if not (path/'state.json').exists() or load_state(path).get('user_id')!=message.from_user.id:raise ValueError('Задание не найдено')
+            previous=load_state(path)
+            if retry_job_id not in scheduled and previous['status'] in ('failed','needs_retry','interrupted') and not queue.full():
+                update_state(path,status='queued',retry_at=None,auto_retry_count=0)
+                scheduled.add(retry_job_id);queue.put_nowait(path)
+            return {'job_id':retry_job_id,'status':load_state(path)['status']}
+        active=sum(st.get('status') in ('receiving','queued','processing','retry_wait','interrupted') for _,st in user_jobs(message.from_user.id))
+        if active>=MAX_USER_JOBS or queue.full():
+            raise ValueError('Очередь заполнена. Можно держать до 10 своих заданий одновременно.')
+        if clip_count is not None and (type(clip_count) is not int or not 1<=clip_count<=20):raise ValueError('Выбери от 1 до 20 моментов')
+        if parent_job_id:
+            if not __import__('re').fullmatch(r'[0-9a-f]{12}',parent_job_id):raise ValueError('Некорректное задание')
+            path=JOB_DIR/parent_job_id
+            if not (path/'manifest.json').exists() or load_state(path).get('user_id')!=message.from_user.id:raise ValueError('Исходное задание ещё не завершено')
         upload = message.video or message.document
         if upload:
             if not (upload.mime_type or '').startswith('video/'):
@@ -335,7 +388,7 @@ async def submit(message:types.Message,bot:Bot,request_id=None):
         job_dir.mkdir(parents=True,mode=0o700)
         state = {'id':job_id,'user_id':message.from_user.id,'chat_id':message.chat.id,
             'source':source,'status':'receiving','created':datetime.now(timezone.utc).isoformat(),
-            'archived':False,'delivered':False,'miniapp_request_id':request_id}
+            'archived':False,'delivered':False,'miniapp_request_id':request_id,'clip_count':clip_count,'parent_job_id':parent_job_id,'root_job_id':load_state(JOB_DIR/parent_job_id).get('root_job_id',parent_job_id) if parent_job_id else job_id}
         save_private_json(job_dir/'state.json',state)
         busy_users.add(message.from_user.id)
         try:
@@ -347,11 +400,16 @@ async def submit(message:types.Message,bot:Bot,request_id=None):
             last_submit[message.from_user.id]=time.monotonic()
         except Exception as exc:
             busy_users.discard(message.from_user.id)
-            update_state(job_dir,status='failed',error=type(exc).__name__)
+            update_state(job_dir,status='failed',error=type(exc).__name__,error_message=str(exc)[:500] if isinstance(exc,(ProcessingError,ValueError)) else 'Ошибка обработки')
             await message.answer('Не удалось получить видео. Попробуй отправить ещё раз.')
             return
-        await message.answer(f'Принято. Задание <code>{job_id}</code>, перед ним в очереди: {max(0,queue.qsize()-1)}.')
+        if not quiet:await message.answer(f'Принято. Задание <code>{job_id}</code>, перед ним в очереди: {max(0,queue.qsize()-1)}.')
         return {'job_id':job_id,'status':'queued'}
+
+@dp.message()
+async def handle_source(message:types.Message,bot:Bot):
+    try:return await submit(message,bot)
+    except ValueError as exc:await message.answer(html.escape(str(exc)))
 
 def math_ceil(value):
     return int(value)+int(value>int(value))
@@ -360,7 +418,7 @@ async def delayed_retries():
     while True:
         for job_dir,state in user_jobs_all():
             if (state.get('status')=='retry_wait' and (state.get('retry_at') or 0)<=time.time()
-                    and state['user_id'] not in busy_users and state['id'] not in scheduled and not queue.full()):
+                    and state['id'] not in scheduled and not queue.full()):
                 update_state(job_dir,status='queued')
                 busy_users.add(state['user_id']);scheduled.add(state['id'])
                 queue.put_nowait(job_dir)

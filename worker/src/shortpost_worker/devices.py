@@ -52,6 +52,12 @@ class MuMu:
         if len(matches)!=1:raise WorkerError('mumu_instance_missing')
         return matches[0]
     def launch(self,index):command([self.executable,'control','-v',index,'launch'],timeout=30)
+    def shutdown(self,index):
+        command([self.executable,'control','-v',index,'shutdown'],timeout=30)
+        deadline=time.monotonic()+45
+        while self.info(index).get('is_process_started'):
+            if time.monotonic()>deadline:raise WorkerError('mumu_shutdown_timeout')
+            time.sleep(1)
     def endpoint(self,index):
         item=self.info(index)
         port=item.get('adb_port')
@@ -114,7 +120,7 @@ class Devices:
             while True:
                 if guard:guard.check()
                 try:
-                    discovered=manager.endpoint(device.instance_index)
+                    discovered=device.adb_endpoint or manager.endpoint(device.instance_index)
                     # A configured loopback bridge belongs to the isolated network.
                     # MuMu may allocate a different NAT port after restart.
                     endpoint=device.adb_endpoint or discovered
@@ -137,6 +143,19 @@ class Devices:
         self.journal.mapping(device.external_id,device.instance_index,device.android_id,endpoint)
         self.serials[device.external_id]=endpoint
         return adb
+    def exclusive(self,device):
+        if not self.config.sequential_emulators:return
+        manager=MuMu(self.config.mumu_manager)
+        # Never switch while any unresolved or executing publication exists.
+        if self.journal.jobs(unfinished=True):raise WorkerError('unfinished_jobs_block_switch')
+        running=[v for v in manager.list() if v.get('is_process_started')]
+        if any(int(v['index']) not in self.config.managed_instance_indices for v in running):
+            raise WorkerError('unmanaged_emulator_running')
+        for item in running:
+            if int(item['index'])!=device.instance_index:manager.shutdown(int(item['index']))
+    def finish(self,device):
+        if self.config.sequential_emulators and not self.journal.jobs(unfinished=True):
+            MuMu(self.config.mumu_manager).shutdown(device.instance_index)
     def resources_ok(self):
         memory=psutil.virtual_memory()
         free=shutil.disk_usage(self.config.state_dir).free

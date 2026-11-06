@@ -130,3 +130,45 @@ def test_preview_limit_closes_google_connection_before_downloading(client,seeded
     r=client.get('/api/v1/miniapp/content/'+str(seeded['clip'])+'/preview',headers=auth())
     assert r.status_code==503 and r.json()['detail']=='preview_too_large'
     assert fake.closed
+
+def test_batch_sources_and_more_requests_are_durable_and_owned(client,telegram_config):
+    from app.models import Setting
+    token=login(client).json()['token']
+    def headers():return {'Authorization':'Bearer '+token,'Idempotency-Key':__import__('uuid').uuid4().hex}
+    h=headers();body={'urls':['https://youtu.be/abcdefghijk','https://youtu.be/01234567890'],'clip_count':8}
+    r=client.post('/api/v1/miniapp/farm/batch',json=body,headers=h);assert r.status_code==201 and len(r.json()['items'])==2
+    assert client.post('/api/v1/miniapp/farm/batch',json=body,headers=h).json()==r.json()
+    with transaction() as s:
+        rows=list(s.scalars(__import__('sqlalchemy').select(Setting).where(Setting.key.like('miniapp_farm:%'))))
+        assert len(rows)==2 and all(v.value['clip_count']==8 for v in rows)
+        s.add(Setting(key='farm_heartbeat',value={'jobs':[{'id':'abc123abc123','user_id':123,'status':'completed','url':body['urls'][0]}]}))
+    r=client.post('/api/v1/miniapp/farm/jobs/abc123abc123/more',json={'clip_count':5},headers=headers());assert r.status_code==201
+    r=client.post('/api/v1/miniapp/farm/jobs/missing/more',json={'clip_count':5},headers=headers());assert r.status_code==404
+    lease=client.post('/api/v1/telegram/farm-requests/claim',headers=auth()).json()['request'];assert lease['user_id']==123 and lease.get('clip_count') in (5,8)
+
+def test_invalid_batch_is_atomic(client,telegram_config):
+    from app.models import Setting
+    from sqlalchemy import select
+    token=login(client).json()['token']
+    r=client.post('/api/v1/miniapp/farm/batch',headers={'Authorization':'Bearer '+token,'Idempotency-Key':'atomic-bad-batch'},json={'urls':['https://youtu.be/abcdefghijk','https://evil.test/file']})
+    assert r.status_code==422
+    with transaction() as s:assert not list(s.scalars(select(Setting).where(Setting.key.like('miniapp_farm:%'))))
+
+def test_ratings_and_comments_are_remembered_without_erasing_each_other(client,seeded,telegram_config):
+    token=login(client).json()['token']
+    def headers():return {'Authorization':'Bearer '+token,'Idempotency-Key':__import__('uuid').uuid4().hex}
+    path='/api/v1/miniapp/content/'+str(seeded['clip'])+'/feedback'
+    assert client.post(path,json={'rating':-1},headers=headers()).status_code==200
+    r=client.post(path,json={'comment':'Обрезали концовку истории'},headers=headers());assert r.status_code==200 and r.json()['rating']==-1
+    rows=client.get('/api/v1/farm/editorial-feedback',headers=auth('farm')).json()['items']
+    assert len(rows)==1 and rows[0]['rating']==-1 and 'концовку' in rows[0]['comment']
+    r=client.get('/api/v1/miniapp/state',headers=headers());assert len(r.json()['feedback'])==1
+    r=client.post(path,json={'rating':1},headers=headers());assert r.json()['comment']=='Обрезали концовку истории'
+    assert client.post(path,json={'rating':3},headers=headers()).status_code==422
+
+def test_batch_capacity_includes_processing_jobs(client,telegram_config):
+    from app.models import Setting
+    with transaction() as s:s.add(Setting(key='farm_heartbeat',value={'jobs':[{'id':'abc','user_id':123,'status':'processing'}]}))
+    token=login(client).json()['token']
+    r=client.post('/api/v1/miniapp/farm/batch',headers={'Authorization':'Bearer '+token,'Idempotency-Key':'processing-capacity'},json={'urls':['https://youtu.be/test'+str(i) for i in range(10)]})
+    assert r.status_code==409 and '9' in r.json()['detail']

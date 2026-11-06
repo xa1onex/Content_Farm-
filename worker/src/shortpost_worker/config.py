@@ -32,6 +32,8 @@ class Config(Strict):
     api_url:str='https://origin.xdoublegroup.online:8443/api/v1'
     worker_id:UUID
     state_dir:Path=Field(default_factory=lambda:Path(os.environ.get('LOCALAPPDATA',Path.home()/'.local/share'))/'ShortPost')
+    sequential_emulators:bool=False
+    managed_instance_indices:list[int]=Field(default_factory=list,max_length=10)
     max_parallel:int=Field(default=1,ge=1,le=10)
     adb_path:Path=Path('adb')
     mumu_manager:Path|None=None
@@ -48,6 +50,10 @@ class Config(Strict):
     devices:list[DeviceConfig]=Field(default_factory=list,max_length=10)
     @model_validator(mode='after')
     def validate_config(self):
+        if self.sequential_emulators:
+            if self.max_parallel!=1 or not self.mumu_manager:raise ValueError('Sequential mode requires MuMu and max_parallel=1')
+            if not self.managed_instance_indices or len(set(self.managed_instance_indices))!=len(self.managed_instance_indices):raise ValueError('Set unique managed instance indices')
+            if any(d.instance_index not in self.managed_instance_indices for d in self.devices):raise ValueError('Device is outside managed instances')
         url=urlsplit(self.api_url)
         if url.scheme!='https' or url.username or url.password or url.query or url.fragment or url.path.rstrip('/')!='/api/v1':
             raise ValueError('Set an HTTPS /api/v1 URL without credentials or query')
