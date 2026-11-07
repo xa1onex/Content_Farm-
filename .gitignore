@@ -46,3 +46,6 @@
 **/.venv-compute/
 **/compute-connection.json
 **/compute-transfer/
+
+**/.discovery-result.json
+**/.discovery.lock

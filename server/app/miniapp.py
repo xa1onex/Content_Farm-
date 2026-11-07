@@ -101,6 +101,8 @@ def state(s=DB,actor=ADMIN):
     data['feedback']=[v.value for v in s.scalars(select(Setting).where(Setting.key.like('editorial_feedback:%'))) if v.value.get('user_id')==user]
     from app.workspace import snapshot
     data.update(snapshot(s,actor,data))
+    from app.discovery import snapshot as discovery_snapshot
+    data['discovery']=discovery_snapshot(s,user)
     return data
 
 class SourceInput(BaseModel):

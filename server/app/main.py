@@ -40,6 +40,8 @@ from app.review import router as review_router
 app.include_router(review_router)
 from app.workspace_api import router as workspace_router
 app.include_router(workspace_router)
+from app.discovery import router as discovery_router
+app.include_router(discovery_router)
 
 @app.middleware('http')
 async def request_context(request:Request,call_next):

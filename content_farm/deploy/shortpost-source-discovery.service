@@ -1,0 +1,20 @@
+[Unit]
+Description=ShortPost automatic YouTube source discovery
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/tg-video-clipper
+ExecStart=/root/tg-video-clipper/venv/bin/python -u /root/tg-video-clipper/discovery.py
+Restart=on-failure
+RestartSec=30
+Nice=10
+CPUQuota=25%
+MemoryMax=384M
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
