@@ -63,18 +63,7 @@
       "action": "click",
       "locator": {
         "by": "xpath",
-        "value": "//*[@text=\"Недавние\"]/ancestor::*[@clickable=\"true\"][1]",
-        "attribute": "text"
-      },
-      "source": null,
-      "timeout_seconds": 15,
-      "optional": false
-    },
-    {
-      "action": "click",
-      "locator": {
-        "by": "accessibility id",
-        "value": "Все альбомы",
+        "value": "//*[@text=\"Недавние\"]/ancestor-or-self::*[@clickable=\"true\"][1]",
         "attribute": "text"
       },
       "source": null,
@@ -85,7 +74,18 @@
       "action": "click",
       "locator": {
         "by": "xpath",
-        "value": "//*[@text=\"{media_album}\"]/ancestor::*[@clickable=\"true\"][1]",
+        "value": "//*[@content-desc=\"Все альбомы\" or @text=\"Показать все\"]",
+        "attribute": "text"
+      },
+      "source": null,
+      "timeout_seconds": 2,
+      "optional": true
+    },
+    {
+      "action": "click",
+      "locator": {
+        "by": "xpath",
+        "value": "//*[@text=\"{media_album}\"]/ancestor-or-self::*[@clickable=\"true\"][1]",
         "attribute": "text"
       },
       "source": null,
@@ -148,5 +148,6 @@
   "metrics": {},
   "max_duration_seconds": 60.0,
   "max_caption_chars": 2000,
-  "max_title_chars": 400
+  "max_title_chars": 400,
+  "click_settle_seconds": 1
 }
