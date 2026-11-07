@@ -441,3 +441,11 @@ def test_own_reel_with_bottom_tabs_is_closed_even_when_profile_restores_it(tmp_p
     p._profile_owner=Mock(side_effect=lambda:None if state['screen']=='profile' else (_ for _ in ()).throw(UIError('account_mismatch')))
     p._open_own_profile()
     assert state['screen']=='profile';p.driver.back.assert_called_once()
+
+
+
+def test_optional_instagram_rating_prompt_is_declined_without_rating_or_submission(tmp_path):
+    p=publisher(tmp_path);cancel=Mock();title=SimpleNamespace(text='Оценить Instagram')
+    p.driver.find_elements.side_effect=lambda by,value: [title] if value.endswith('/appirater_title_area') else ([cancel] if value.endswith('/appirater_cancel_button') else [])
+    p._dismiss_account_switcher();cancel.click.assert_called_once();p.driver.back.assert_not_called()
+    title.text='Другой диалог';cancel.reset_mock();p._dismiss_account_switcher();cancel.click.assert_not_called()

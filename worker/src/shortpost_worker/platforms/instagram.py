@@ -23,6 +23,11 @@ class InstagramPublisher(PlatformPublisher):
         element=self.find(locator);self.guard.check();element.click()
 
     def _dismiss_account_switcher(self):
+        # Decline only Instagram's identified optional rating prompt.
+        title=self.driver.find_elements('id',self._id('appirater_title_area').value)
+        cancel=self.driver.find_elements('id',self._id('appirater_cancel_button').value)
+        if len(title)==1 and title[0].text=='Оценить Instagram' and len(cancel)==1:
+            self.guard.check();cancel[0].click();self._settle(.5)
         # Recent Instagram versions can overlay the profile with Meta's switcher.
         # Close only this identified sheet; never select or add another account.
         label=Locator(by='xpath',value='//*[@text="Открыть настройки Аккаунта Meta"]')
