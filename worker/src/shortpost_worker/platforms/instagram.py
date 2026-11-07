@@ -34,9 +34,8 @@ class InstagramPublisher(PlatformPublisher):
     def _open_own_profile(self):
         self._dismiss_account_switcher()
         # The dedicated own-Reels viewer has no bottom navigation bar.
-        if self.driver.find_elements('id',self._id('clips_viewer_action_bar_title').value):
-            if normalize_user(self.text(self._id('clips_author_username')))!=normalize_user(self.assignment.account.username):
-                raise UIError('publication_author_unverified')
+        if (self.driver.find_elements('id',self._id('clips_viewer_action_bar_title').value)
+                and not self.driver.find_elements('id',self._id('profile_tab').value)):
             self.guard.check();self.driver.back();self._settle(.5)
         # Some versions hide bottom tabs in the own-post viewer. Leave that
         # identified read-only screen before trying any bottom navigation.

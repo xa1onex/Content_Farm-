@@ -354,3 +354,19 @@ def test_pending_processing_blocks_extra_next_navigation(tmp_path):
     p=publisher(tmp_path);first=Mock();current=Mock();first.get_attribute.return_value='Далее';current.get_attribute.return_value='Далее';current.is_enabled.return_value=True
     p.find=Mock(side_effect=[first,UIError('ui_selector_missing'),current]);p.driver.find_elements.return_value=[Mock()];p.authorize_continue=Mock()
     p.submit(Mock());first.click.assert_called_once();current.click.assert_not_called();p.authorize_continue.assert_not_called()
+
+
+def test_recommended_reel_does_not_block_return_to_the_own_profile(tmp_path):
+    p=publisher(tmp_path);state={'screen':'recommendation'}
+    def elements(by,value):
+        if value.endswith('/clips_viewer_action_bar_title') and state['screen']=='recommendation':return [Mock()]
+        if value.endswith('/profile_tab'):return [Mock()]
+        if value.endswith('/profile_header_familiar_post_count_value') and state['screen']=='profile':return [Mock()]
+        return []
+    p.driver.find_elements.side_effect=elements
+    def click(locator):
+        if locator.value.endswith('/feed_tab'):state['screen']='home'
+        if locator.value.endswith('/profile_tab'):state['screen']='profile'
+    p._click=Mock(side_effect=click);p._profile_owner=Mock();p.text=Mock(return_value='unrelated_reel_author')
+    p._open_own_profile()
+    assert state['screen']=='profile';p._profile_owner.assert_called_once();p.driver.back.assert_not_called();p.text.assert_not_called()
