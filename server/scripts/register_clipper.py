@@ -13,7 +13,7 @@ def clip_payload(clip,state,source_id,category_id,format_id,topic_id=None):
         'title':clip.get('title') or clip.get('description','')[:200] or clip['file'],
         'description':clip.get('description',''),'category_id':category_id,'format_id':format_id,'topic_id':topic_id,
         'duration_seconds':clip['end_time']-clip['start_time'],
-        'extra':{'farm':'tg-video-clipper','farm_job_id':state['id'],'file':clip['file']}}
+        'extra':{'farm':'tg-video-clipper','farm_job_id':state['id'],'file':clip['file'],**({'transcript':clip['transcript']} if clip.get('transcript',{}).get('text') else {})}}
 
 def main():
     parser=argparse.ArgumentParser()

@@ -12,7 +12,7 @@ class TwoStepTests(unittest.TestCase):
   with tempfile.TemporaryDirectory() as folder:
    root=Path(folder);p=root/'abc123abc123';p.mkdir()
    save_private_json(p/'state.json',{'id':p.name,'user_id':7,'status':'processing','analysis_only':True,'source':{'kind':'youtube','value':'https://youtu.be/abcdefghijk'},'details':{'title':'Test'}})
-   (p/'source.mp4').write_bytes(b'cached');(p/'transcript.json').write_text('{"segments":[]}')
+   (p/'source.mp4').write_bytes(b'cached');(p/'transcript.json').write_text(json.dumps({'language':'ru','segments':[{'words':[{'start':12,'end':14,'word':'Первая реплика.'},{'start':42,'end':44,'word':'Вторая реплика.'}]}]}))
    first=[{'start_time':10,'end_time':30,'description':'One'}];second=[{'start_time':40,'end_time':60,'description':'Two'}]
    def build(video,start,end,i,where,transcript):
     final=where/f'short_{i+1:02d}.mp4';final.write_bytes(b'test clip');return final
@@ -23,6 +23,8 @@ class TwoStepTests(unittest.TestCase):
     state.update(clip_count=2,selection_confirmed=True);save_private_json(p/'state.json',state)
     result=processor.process_job(p)
     self.assertEqual(len(result['clips']),2);self.assertEqual(render.call_count,2)
+    self.assertEqual(result['clips'][0]['transcript']['text'],'Первая реплика.')
+    self.assertEqual(result['clips'][1]['transcript']['text'],'Вторая реплика.')
     self.assertEqual(model.call_args.kwargs['count'],1);self.assertEqual(model.call_args.kwargs['excluded'],first)
     transcription.assert_not_called();download.assert_not_called()
  def test_render_confirmation_is_idempotent_and_checks_owner(self):

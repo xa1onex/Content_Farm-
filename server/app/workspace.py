@@ -72,8 +72,11 @@ def serialize_clips(s,clips,user):
     for c in clips:
         d=decision(c,flags);reserved={j.platform for j in jobs[c.id]};reads=[metrics[p.id] for p in publications[c.id] if p.id in metrics]
         f=feedback.get(str(c.id),{})
+        transcript=(c.extra or {}).get('transcript')
+        spoken={'text':transcript['text'],'language':transcript.get('language')} if isinstance(transcript,dict) and isinstance(transcript.get('text'),str) and transcript['text'].strip() else None
         items.append({'id':str(c.id),'passport':c.passport,'title':c.title,'description':c.description,
           'created_at':c.created_at.isoformat(),'duration_seconds':c.duration_seconds,'status':c.status,'decision':d,
+          'transcript':spoken,
           'feedback':{'rating':f.get('rating',0),'comment':f.get('comment',''),'at':f.get('at')},
           'platforms':{p:('used' if (c.id,p) in uses else 'reserved' if p in reserved else 'review_pending' if d!='approved' else 'available' if c.status=='ready' and p in c.platforms else 'unavailable') for p in PLATFORMS},
           'published_count':len(publications[c.id]),'planned_count':sum(j.status in WAITING for j in jobs[c.id]),

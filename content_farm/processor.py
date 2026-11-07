@@ -445,7 +445,8 @@ def process_job(job_dir, progress=lambda text:None):
                 final.unlink(missing_ok=True)
         if not final.exists():
             final = build_short(video,seg['start_time'],seg['end_time'],i,job_dir,transcript)
-        clips.append(finish_output(job_dir,i,final,seg))
+        from transcripts import clip_transcript
+        clips.append({**finish_output(job_dir,i,final,seg),'transcript':clip_transcript(transcript,seg['start_time'],seg['end_time'])})
     manifest = {'job_id':state['id'],'identity_version':1,'title':details.get('title','Видео'),'source':source,
         'duration':duration,'composition':{'layout':VIDEO_LAYOUT,
             'background':BG_VIDEO.name if VIDEO_LAYOUT=='split' else None,

@@ -86,3 +86,19 @@ def test_analyze_then_render_is_owned_and_durably_idempotent(client,telegram_con
     with transaction() as s:
         render=[v.value for v in s.scalars(select(Setting).where(Setting.key.like('miniapp_farm:%'))) if v.value.get('mode')=='render'][0]
         assert render['render_job_id']=='abc123abc123' and render['clip_count']==5
+
+def test_library_returns_spoken_text_separately_from_title_description_and_private_extra(client,seeded):
+    with transaction() as s:
+        c=s.get(Clip,seeded['clip']);c.title='Заголовок';c.description='Описание публикации'
+        c.extra={'farm_job_id':'abc123abc123','private_key':'not-for-dashboard','transcript':{
+            'text':'Первая реплика.\n\nВторая реплика <текст>.','language':'ru','start_seconds':100,
+            'end_seconds':120,'internal':'not-for-dashboard'}}
+    response=client.get('/api/v1/miniapp/library?filter=all',headers=auth());assert response.status_code==200
+    row=response.json()['items'][0]
+    assert row['transcript']=={'text':'Первая реплика.\n\nВторая реплика <текст>.','language':'ru'}
+    assert row['description']=='Описание публикации' and 'not-for-dashboard' not in response.text
+    assert client.get('/api/v1/miniapp/library').status_code==401
+
+def test_missing_transcript_is_explicit_and_does_not_use_caption_as_speech(client,seeded):
+    response=client.get('/api/v1/miniapp/library',headers=auth()).json()
+    assert response['items'][0]['transcript'] is None

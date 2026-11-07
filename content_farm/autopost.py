@@ -97,7 +97,8 @@ def register_job(job_dir):
                     'category_id':AUTOPOST_CATEGORY_ID,'format_id':AUTOPOST_FORMAT_ID,
                     'duration_seconds':clip['duration_seconds'],
                     'extra':{'farm':'tg-video-clipper','farm_job_id':state['id'],
-                             'file':clip['file'],'clip_id':clip['id']}}
+                             'file':clip['file'],'clip_id':clip['id'],
+                             **({'transcript':clip['transcript']} if clip.get('transcript',{}).get('text') else {})}}
                 try:
                     existing = client.post('/content',payload,'content:'+clip['id'])
                 except RegistrationError:
