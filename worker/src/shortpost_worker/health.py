@@ -24,7 +24,9 @@ def network(adb, expected, transport='socks5'):
         if expected:ipaddress.ip_address(expected)
         payload='GET /?shortpost='+os.urandom(8).hex()+' HTTP/1.1\r\nHost: api.ipify.org\r\nConnection: close\r\n\r\n'
         escaped=''.join('\\%03o'%v for v in payload.encode())
-        raw=adb.shell('sh','-c',"printf '"+escaped+"' | toybox nc -4 -w 8 -W 8 -q 8 api.ipify.org 80 | toybox od -An -v -tx1",timeout=15)
+        # MuMu Android 12 can half-close netcat immediately on stdin EOF despite
+        # -q. Its HTTP proxy then returns no bytes. Keep stdin open for the reply.
+        raw=adb.shell('sh','-c',"(printf '"+escaped+"'; sleep 8) | toybox nc -4 -w 8 -W 8 api.ipify.org 80 | toybox od -An -v -tx1",timeout=15)
         # Hex preserves HTTP bytes through Windows ADB (which can double CRLF).
         class Socket:
             def makefile(self,*args):return io.BytesIO(bytes.fromhex(raw))

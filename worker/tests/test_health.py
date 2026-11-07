@@ -64,3 +64,17 @@ def test_cached_adb_transport_is_not_live_without_a_shell_reply(config,monkeypat
     def disconnected(*args):raise RuntimeError('closed transport')
     monkeypatch.setattr('shortpost_worker.health.ADB.identity',disconnected)
     r=device_health(config,config.devices[0]);assert not r['online'] and not r['identity_checked']
+
+
+def test_android_proxy_probe_keeps_stdin_open_until_http_reply_arrives():
+    # Actual Android 12/proxy behavior: immediate stdin EOF gives an empty reply,
+    # while holding the write side open returns the correctly proxied HTTP body.
+    response=b'HTTP/1.1 200 OK\r\nContent-Length: 11\r\n\r\n203.0.113.9'
+    def android_shell(*args,**kwargs):
+        command=args[-1]
+        if 'api.ipify.org 80' in command:
+            return response.hex() if 'sleep 8' in command else ''
+        return ''  # UDP remains blocked for HTTP CONNECT proxies.
+    adb=Mock();adb.shell.side_effect=android_shell
+    result=network(adb,'203.0.113.9','http')
+    assert result['checked'] and result['ready'] and result['tcp_verified'] and result['udp_blocked']
