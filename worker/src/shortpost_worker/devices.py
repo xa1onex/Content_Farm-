@@ -151,7 +151,9 @@ class Devices:
         except WorkerError:pass
         command([self.config.adb_path,'connect',endpoint])
         adb=ADB(self.config.adb_path,endpoint)
-        deadline=time.monotonic()+60;reconnect_at=time.monotonic()+5
+        # Bridged MuMu can report Android started well before adbd joins its LAN.
+        # Keep the same single instance alive long enough for DHCP and adbd readiness.
+        deadline=time.monotonic()+180;reconnect_at=time.monotonic()+5
         while True:
             if guard:guard.check()
             try:

@@ -313,7 +313,7 @@ class Engine:
             if str(hint.get('job_id'))!=str(job_id):raise WorkerError('requested_job_not_available')
             device=self.devices.configured(hint['external_id'])
             await asyncio.to_thread(self.devices.exclusive,device)
-            await asyncio.to_thread(self.devices.connect,device,ReadGuard(self.api,180))
+            await asyncio.to_thread(self.devices.connect,device,ReadGuard(self.api,300))
             from .health import device_health
             self.device_health[device.external_id]=await asyncio.to_thread(device_health,self.config,device)
             await self.send_heartbeat()
@@ -342,7 +342,7 @@ class Engine:
         device=self.devices.configured(planned['external_id'])
         await asyncio.to_thread(self.devices.exclusive,device)
         try:
-            await asyncio.to_thread(self.devices.connect,device,ReadGuard(self.api,180))
+            await asyncio.to_thread(self.devices.connect,device,ReadGuard(self.api,300))
             self.device_health[device.external_id]=await asyncio.to_thread(device_health,self.config,device)
             await self.send_heartbeat()
             if self.journal.control('paused')=='1' or self.journal.control('stop')=='1':return {'job':None}

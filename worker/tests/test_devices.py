@@ -73,3 +73,28 @@ def test_pinned_isolated_endpoint_survives_mumu_nat_port_change(config,journal,m
     monkeypatch.setattr(ADB,'run',lambda *a,**kw:'device')
     monkeypatch.setattr(ADB,'shell',lambda self,*args,**kw:'1' if args[0]=='getprop' else config.devices[0].android_id)
     assert Devices(config,journal).connect(config.devices[0]).serial=='127.0.0.1:16384'
+
+
+def test_cold_isolated_android_has_time_to_bring_up_adb_without_reboot_loop(config,journal,monkeypatch):
+    clock=SimpleNamespace(now=0.)
+    monkeypatch.setattr('shortpost_worker.devices.time.monotonic',lambda:clock.now)
+    monkeypatch.setattr('shortpost_worker.devices.time.sleep',lambda seconds:setattr(clock,'now',clock.now+seconds))
+    commands=[];monkeypatch.setattr('shortpost_worker.devices.command',lambda args,**kw:commands.append(args) or 'connected')
+    monkeypatch.setattr(ADB,'run',lambda *args,**kw:'device' if clock.now>=75 else 'offline')
+    monkeypatch.setattr(ADB,'shell',lambda self,*args,**kw:'1' if args[0]=='getprop' else config.devices[0].android_id)
+    config.devices[0].adb_endpoint='127.0.0.1:16544';guard=Mock()
+    adb=Devices(config,journal).connect(config.devices[0],guard)
+    assert adb.serial=='127.0.0.1:16544' and clock.now>=75
+    assert len([x for x in commands if x[1]=='connect'])>1
+    assert not any('kill-server' in x for x in commands)
+
+
+def test_cold_adb_readiness_wait_remains_bounded(config,journal,monkeypatch):
+    clock=SimpleNamespace(now=0.)
+    monkeypatch.setattr('shortpost_worker.devices.time.monotonic',lambda:clock.now)
+    monkeypatch.setattr('shortpost_worker.devices.time.sleep',lambda seconds:setattr(clock,'now',clock.now+seconds))
+    monkeypatch.setattr('shortpost_worker.devices.command',lambda *args,**kw:'connected')
+    monkeypatch.setattr(ADB,'run',lambda *args,**kw:'offline')
+    config.devices[0].adb_endpoint='127.0.0.1:16544'
+    with pytest.raises(WorkerError,match='adb_connect_timeout'):Devices(config,journal).connect(config.devices[0],Mock())
+    assert 180<=clock.now<=184
