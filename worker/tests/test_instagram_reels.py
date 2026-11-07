@@ -53,6 +53,7 @@ def test_same_old_link_does_not_confirm_a_new_post(tmp_path):
 def test_upload_timeout_and_lease_loss_stop_polling(tmp_path,monkeypatch):
     clock=fake_clock(monkeypatch);p=publisher(tmp_path);p.profile.confirmation_timeout_seconds=2
     p._click=Mock();p._profile_owner=Mock();p._post_count=Mock(return_value=5);p._drag=Mock()
+    p._open_latest_reel=Mock(side_effect=UIError('ui_selector_missing'))
     with pytest.raises(UIError,match='publication_not_confirmed'):p.verify_publication()
     assert clock.now==2
     p.guard.check.side_effect=LeaseLost()
@@ -178,7 +179,7 @@ def test_first_reel_below_recommendations_is_found_by_exact_identity(tmp_path):
     p=publisher(tmp_path);tile=Mock();p.find=Mock(side_effect=[UIError('ui_selector_missing'),tile]);p.text=Mock(return_value='example')
     p._open_latest_reel()
     p._drag.assert_called_once_with(.78,.35);tile.click.assert_called_once()
-    assert all(call.args[0].value=='Видео Reels example в строке 1, столбце 1' for call in p.find.call_args_list)
+    assert all('image_button' in call.args[0].value and ' в строке 1, столбце 1' in call.args[0].value for call in p.find.call_args_list)
 
 
 def test_missing_exact_first_reel_never_selects_an_unrelated_tile(tmp_path):
@@ -209,7 +210,7 @@ def test_reels_only_profile_uses_own_first_thumbnail_and_checks_author(tmp_path)
     p.driver.find_elements.return_value=[tab];tile=Mock();p.find=Mock(return_value=tile);p.text=Mock(return_value='example')
     p._open_latest_reel()
     assert 'preview_clip_thumbnail' in p.find.call_args.args[0].value
-    assert 'example.' in p.find.call_args.args[0].value
+    assert 'clips_grid_recyclerview' in p.find.call_args.args[0].value
     tile.click.assert_called_once();p._drag.assert_not_called()
 
 
@@ -240,3 +241,63 @@ def test_reels_viewer_stale_clipboard_is_not_a_publication_proof(tmp_path):
     p=publisher(tmp_path);p._click=Mock();p.text=Mock(return_value='example')
     p.driver.get_clipboard_text.side_effect=lambda:p.driver.set_clipboard_text.call_args.args[0]
     with pytest.raises(UIError,match='publication_link_not_copied'):p._read_reels_viewer()
+
+
+def test_account_verification_saves_real_count_and_baseline_link_before_upload(tmp_path,monkeypatch):
+    import json
+    from shortpost_worker.platforms.base import PlatformPublisher
+    p=publisher(tmp_path);a=SimpleNamespace(account=p.assignment.account,job=SimpleNamespace(id='local-job',attempts=1))
+    monkeypatch.setattr(PlatformPublisher,'verify_account',lambda self,assignment:setattr(self,'assignment',assignment))
+    p._dismiss_share=Mock();p._open_own_profile=Mock();p._post_count=Mock(return_value=5)
+    p._open_latest_reel=Mock();p.read_open_reel=Mock(return_value={'external_id':'OLD_123'});p._profile_owner=Mock()
+    p.verify_account(a)
+    saved=json.loads((tmp_path/'local-job-1/verification-baseline.json').read_text())
+    assert saved['username']=='example' and saved['before_count']==5 and saved['before_post_id']=='OLD_123'
+
+
+def test_identified_meta_account_switcher_is_closed_without_switching_accounts(tmp_path):
+    p=publisher(tmp_path);p._click=Mock()
+    p.driver.find_elements.side_effect=lambda by,value:[Mock()] if 'Открыть настройки Аккаунта Meta' in value else []
+    p._dismiss_account_switcher()
+    p._click.assert_not_called();p.driver.back.assert_called_once()
+
+
+def test_other_close_buttons_are_not_touched_without_meta_switcher_identity(tmp_path):
+    p=publisher(tmp_path);p._click=Mock();p.driver.find_elements.return_value=[]
+    p._dismiss_account_switcher();p._click.assert_not_called();p.driver.back.assert_not_called()
+
+
+def test_display_name_is_not_used_as_author_identity_for_profile_thumbnail(tmp_path):
+    p=publisher(tmp_path);p.find=Mock(return_value=Mock());p.text=Mock(return_value='someone_else')
+    with pytest.raises(UIError,match='publication_author_unverified'):p._open_latest_reel()
+    locator=p.find.call_args.args[0]
+    assert 'image_button' in locator.value and 'example' not in locator.value
+
+
+def test_failed_content_read_returns_to_profile_and_refreshes_before_retry(tmp_path,monkeypatch):
+    fake_clock(monkeypatch);p=publisher(tmp_path);p._open_own_profile=Mock();p._post_count=Mock(return_value=6)
+    p._open_latest_reel=Mock();p.read_open_reel=Mock(side_effect=[UIError('publication_content_unverified'),{'external_id':'NEW_123'}])
+    assert p.verify_publication()['external_id']=='NEW_123'
+    assert p._open_own_profile.call_count==3;p._drag.assert_called_once_with(.28,.78)
+
+
+def test_own_post_without_bottom_navigation_is_closed_before_tab_clicks(tmp_path):
+    p=publisher(tmp_path);state={'screen':'post'}
+    def elements(by,value):
+        if state['screen']=='post' and value.endswith('/action_bar_button_back'):return [Mock()]
+        if state['screen']=='post' and value.endswith('/action_bar_title'):return [SimpleNamespace(text='Публикации')]
+        if state['screen']=='profile' and value.endswith('/profile_header_familiar_post_count_value'):return [Mock()]
+        return []
+    p.driver.find_elements.side_effect=elements;p.driver.back.side_effect=lambda:state.update(screen='profile')
+    def click(locator):
+        if state['screen']!='profile':raise UIError('ui_selector_missing')
+    p._click=Mock(side_effect=click);p._profile_owner=Mock()
+    p._open_own_profile();p.driver.back.assert_called_once();assert p._click.call_count==2
+
+
+def test_profile_prefers_dedicated_reels_view_when_grid_tab_is_selected(tmp_path):
+    p=publisher(tmp_path);tab=Mock();tab.get_attribute.return_value='false'
+    p.driver.find_elements.return_value=[tab];p._click=Mock();p.find=Mock(return_value=Mock());p.text=Mock(return_value='example')
+    p._open_latest_reel()
+    assert 'preview_clip_thumbnail' in p.find.call_args.args[0].value
+    p._click.assert_called_once();assert '@content-desc="Reels"' in p._click.call_args.args[0].value

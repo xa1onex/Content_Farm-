@@ -1,4 +1,4 @@
-import re,time,uuid,logging
+import re,time,uuid,logging,json
 from selenium.common.exceptions import WebDriverException
 from urllib3.exceptions import HTTPError as AppiumTransportError
 from .base import PlatformPublisher,canonical_post,normalize_user
@@ -22,17 +22,34 @@ class InstagramPublisher(PlatformPublisher):
     def _click(self,locator):
         element=self.find(locator);self.guard.check();element.click()
 
+    def _dismiss_account_switcher(self):
+        # Recent Instagram versions can overlay the profile with Meta's switcher.
+        # Close only this identified sheet; never select or add another account.
+        label=Locator(by='xpath',value='//*[@text="Открыть настройки Аккаунта Meta"]')
+        found=self.driver.find_elements(label.by,label.value)
+        if len(found)>1:raise UIError('ambiguous_ui_selector')
+        if found:
+            self.guard.check();self.driver.back();self._settle(.5)
+
     def _open_own_profile(self):
+        self._dismiss_account_switcher()
         # The dedicated own-Reels viewer has no bottom navigation bar.
         if self.driver.find_elements('id',self._id('clips_viewer_action_bar_title').value):
             if normalize_user(self.text(self._id('clips_author_username')))!=normalize_user(self.assignment.account.username):
                 raise UIError('publication_author_unverified')
             self.guard.check();self.driver.back();self._settle(.5)
+        # Some versions hide bottom tabs in the own-post viewer. Leave that
+        # identified read-only screen before trying any bottom navigation.
+        for _ in range(3):
+            back=self.driver.find_elements('id',self._id('action_bar_button_back').value)
+            title=self.driver.find_elements('id',self._id('action_bar_title').value)
+            if len(back)!=1 or len(title)!=1 or title[0].text not in ('Публикации','Видео Reels'):break
+            self.guard.check();self.driver.back();self._settle(.5)
         # Return from other tabs, then close a retained nested post viewer.
         self._click(self._id('feed_tab'))
         self._settle(.5)
         self._click(self._id('profile_tab'))
-        self._settle(.5)
+        self._settle(.5);self._dismiss_account_switcher()
         # Instagram preserves each tab's navigation stack. Its own-post viewer
         # must be closed explicitly; a tab switch alone does not reset it.
         for _ in range(3):
@@ -72,10 +89,13 @@ class InstagramPublisher(PlatformPublisher):
         reels_tab=Locator(by='xpath',value='//*[@resource-id="com.instagram.android:id/profile_tab_icon_view" and @content-desc="Reels"]')
         tabs=self.driver.find_elements(reels_tab.by,reels_tab.value)
         in_reels=len(tabs)==1 and tabs[0].get_attribute('selected')=='true'
-        grid=Locator(by='accessibility id',value=f'Видео Reels {username} в строке 1, столбце 1')
-        thumb=Locator(by='xpath',value='(//*[@resource-id="com.instagram.android:id/preview_clip_thumbnail" and (starts-with(@content-desc,'+
-            xpath_literal('Видео\u00a0Reels от '+username+'.')+') or starts-with(@content-desc,'+xpath_literal('Видео Reels от '+username+'.')+'))])[1]')
-        for use_reels in ([True] if in_reels else [False,True]):
+        suffix=' в строке 1, столбце 1'
+        # Instagram labels thumbnails with the display name, not the unique username.
+        # Select the first own-profile cell by role/position, then prove its author.
+        grid=Locator(by='xpath',value='//*[@resource-id="com.instagram.android:id/image_button" and starts-with(@content-desc,"Видео Reels ") and substring(@content-desc,string-length(@content-desc)-'+str(len(suffix)-1)+')='+xpath_literal(suffix)+']')
+        thumb=Locator(by='xpath',value='(//*[@resource-id="com.instagram.android:id/clips_grid_recyclerview"]//*[@resource-id="com.instagram.android:id/preview_clip_thumbnail" and (starts-with(@content-desc,'+
+            xpath_literal('Видео\u00a0Reels от ')+') or starts-with(@content-desc,'+xpath_literal('Видео Reels от ')+'))])[1]')
+        for use_reels in ([True] if len(tabs)==1 else [False,True]):
             if use_reels and not in_reels:
                 self._click(reels_tab);self._settle(.5)
             locator=thumb if use_reels else grid
@@ -183,6 +203,12 @@ class InstagramPublisher(PlatformPublisher):
             self._open_latest_reel();self.before_post_id=self.read_open_reel()['external_id']
             self.guard.check();self.driver.back();self._profile_owner()
 
+        directory=self.artifacts/(str(assignment.job.id)+'-'+str(assignment.job.attempts))
+        directory.mkdir(parents=True,exist_ok=True)
+        (directory/'verification-baseline.json').write_text(json.dumps({
+            'username':assignment.account.username,'before_count':self.before_post_count,
+            'before_post_id':self.before_post_id,'checked_at':time.time()}),encoding='utf-8')
+
     def submit(self,before_submit):
         super().submit(before_submit)
         if not self.profile.instagram_reels_452:return
@@ -203,7 +229,7 @@ class InstagramPublisher(PlatformPublisher):
         deadline=time.monotonic()+self.profile.confirmation_timeout_seconds
         transient_ui={'ui_selector_missing','publication_content_unverified','publication_author_unverified','publication_link_not_copied'}
         while True:
-            self.guard.check();profile_open=False
+            self.guard.check();profile_open=False;retry_profile=False
             try:
                 # Instagram can redirect to the Reels feed after accepting the upload.
                 # Reopening our profile is safe to repeat; submit() is never called here.
@@ -213,6 +239,7 @@ class InstagramPublisher(PlatformPublisher):
                 if count<self.before_post_count or count>self.before_post_count+1:
                     raise UIError('publication_count_ambiguous')
                 if count==self.before_post_count+1:
+                    retry_profile=True
                     self._open_latest_reel();profile_open=False
                     proof=self.read_open_reel(self.context['caption'])
                     if proof['external_id']==self.before_post_id:raise UIError('publication_link_not_new')
@@ -223,8 +250,11 @@ class InstagramPublisher(PlatformPublisher):
             except (WebDriverException,AppiumTransportError,TimeoutError,ConnectionError) as exc:
                 logging.getLogger(__name__).warning('confirmation_transport_wait type=%s',type(exc).__name__)
             if time.monotonic()>=deadline:raise UIError('publication_not_confirmed')
-            if profile_open:
+            if profile_open or retry_profile:
                 try:self._open_own_profile();self._drag(.28,.78)
+                except UIError as exc:
+                    if exc.code not in transient_ui:raise
+                    logging.getLogger(__name__).warning('confirmation_refresh_wait code=%s',exc.code)
                 except (WebDriverException,AppiumTransportError,TimeoutError,ConnectionError) as exc:
                     logging.getLogger(__name__).warning('confirmation_refresh_wait type=%s',type(exc).__name__)
             until=min(deadline,time.monotonic()+5)

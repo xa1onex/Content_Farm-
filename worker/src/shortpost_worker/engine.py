@@ -1,4 +1,4 @@
-import asyncio,logging,time,uuid
+import asyncio,logging,time,uuid,json,traceback
 from datetime import datetime
 from pathlib import Path
 from .models import Assignment
@@ -138,6 +138,11 @@ class Engine:
             if publisher:
                 try:await asyncio.to_thread(publisher.evidence,identifier,attempt,code)
                 except Exception:pass
+                try:
+                    directory=self.config.state_dir/'artifacts'/(identifier+'-'+str(attempt));directory.mkdir(parents=True,exist_ok=True)
+                    (directory/'trace.json').write_text(json.dumps({'error_code':code,'exception_type':type(exc).__name__,
+                        'frames':[{'file':Path(f.filename).name,'function':f.name,'line':f.lineno} for f in traceback.extract_tb(exc.__traceback__)]}),encoding='utf-8')
+                except OSError:pass
             if not current['result']:
                 uncertain=current['irreversible_at'] is not None
                 payload=lease_event(assignment,outcome='unknown' if uncertain else 'safe_failure',
