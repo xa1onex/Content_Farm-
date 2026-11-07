@@ -370,3 +370,24 @@ def test_recommended_reel_does_not_block_return_to_the_own_profile(tmp_path):
     p._click=Mock(side_effect=click);p._profile_owner=Mock();p.text=Mock(return_value='unrelated_reel_author')
     p._open_own_profile()
     assert state['screen']=='profile';p._profile_owner.assert_called_once();p.driver.back.assert_not_called();p.text.assert_not_called()
+
+
+def test_reels_caption_expands_inline_without_leaving_own_viewer(tmp_path):
+    p=publisher(tmp_path);expanded={'value':False};exact=Mock();exact.is_displayed.return_value=True
+    def find(by,value):
+        if 'clips_caption_component' in value and 'Описание ролика' in value:
+            return [exact] if expanded['value'] else []
+        return []
+    p.driver.find_elements.side_effect=find
+    p._click=Mock(side_effect=lambda locator:expanded.update(value=True) if 'clips_caption_component' in locator.value else None)
+    p.text=Mock(return_value='example');p._clipboard=Mock(side_effect=[None,'https://www.instagram.com/reel/INLINE123/'])
+    assert p._read_reels_viewer('Описание ролика')['external_id']=='INLINE123'
+    p.driver.back.assert_not_called()
+    assert '//*[@text=' in p.driver.find_elements.call_args_list[0].args[1]
+
+
+def test_inline_caption_proof_rejects_ambiguous_duplicates(tmp_path):
+    p=publisher(tmp_path);p.text=Mock(return_value='example')
+    p.driver.find_elements.return_value=[Mock(),Mock()]
+    with pytest.raises(UIError,match='ambiguous_ui_selector'):p._read_reels_viewer('Описание ролика')
+    p.driver.set_clipboard_text.assert_not_called()

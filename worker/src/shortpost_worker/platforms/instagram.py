@@ -171,14 +171,24 @@ class InstagramPublisher(PlatformPublisher):
         if normalize_user(self.text(self._id('clips_author_username')))!=normalize_user(username):
             raise UIError('publication_author_unverified')
         if caption is not None:
-            # Expanding the actual caption opens its original entry in the comments sheet.
-            self._click(Locator(by='xpath',value='//*[@resource-id="com.instagram.android:id/clips_caption_component"]//*[@clickable="true"]'))
-            try:
-                expected='Пользователь '+username+' оставил комментарий: "'+caption+'"'
-                locator=Locator(by='xpath',value='//*[@text='+xpath_literal(expected)+' or @content-desc='+xpath_literal(expected)+']')
-                if self.text(locator)!=expected:
-                    if self.text(locator.model_copy(update={'attribute':'content-desc'}))!=expected:raise UIError('publication_content_unverified')
-            finally:self.guard.check();self.driver.back();self._settle(.5)
+            # 452 expands the caption inline; later versions open its original
+            # comment. Accept only the complete exact caption in either location.
+            inline=Locator(by='xpath',value='//*[@resource-id="com.instagram.android:id/clips_caption_component"]//*[@text='+xpath_literal(caption)+' or @content-desc='+xpath_literal(caption)+']')
+            matches=self.driver.find_elements(inline.by,inline.value)
+            if len(matches)>1:raise UIError('ambiguous_ui_selector')
+            if not matches:
+                self._click(Locator(by='xpath',value='//*[@resource-id="com.instagram.android:id/clips_caption_component"]//*[@clickable="true"]'))
+                self._settle(.5)
+                matches=self.driver.find_elements(inline.by,inline.value)
+                if len(matches)>1:raise UIError('ambiguous_ui_selector')
+                if not matches:
+                    try:
+                        expected='Пользователь '+username+' оставил комментарий: "'+caption+'"'
+                        locator=Locator(by='xpath',value='//*[@text='+xpath_literal(expected)+' or @content-desc='+xpath_literal(expected)+']')
+                        if self.text(locator)!=expected:
+                            if self.text(locator.model_copy(update={'attribute':'content-desc'}))!=expected:raise UIError('publication_content_unverified')
+                    finally:self.guard.check();self.driver.back();self._settle(.5)
+            if matches and not matches[0].is_displayed():raise UIError('publication_content_unverified')
         nonce='shortpost-link-check-'+uuid.uuid4().hex
         self._clipboard(nonce)
         if normalize_user(self.text(self._id('clips_author_username')))!=normalize_user(username):raise UIError('publication_author_unverified')
