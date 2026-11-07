@@ -422,3 +422,22 @@ def test_visibility_requires_proof_of_changed_setting(tmp_path):
     p.read_open_reel=Mock(return_value={'url':url});p._visibility_controls=Mock();p._close_visibility_controls=Mock()
     p.driver.find_elements.return_value=[]
     with pytest.raises(UIError,match='visibility_not_confirmed'):p.hide_public_counts({'url':url})
+
+
+@pytest.mark.parametrize('initial',['own-reels','home'])
+def test_own_reel_with_bottom_tabs_is_closed_even_when_profile_restores_it(tmp_path,initial):
+    p=publisher(tmp_path);state={'screen':initial,'retained':True}
+    def find(by,value):
+        name=value.rsplit('/',1)[-1]
+        if name=='clips_viewer_action_bar_title' and state['screen']=='own-reels':return [SimpleNamespace(text='Ваши видео Reels')]
+        if name=='profile_tab':return [Mock()]
+        if name=='profile_header_familiar_post_count_value' and state['screen']=='profile':return [Mock()]
+        return []
+    def click(locator):
+        if locator.value.endswith('/feed_tab'):state['screen']='home'
+        elif locator.value.endswith('/profile_tab'):state['screen']='own-reels' if state['retained'] else 'profile'
+    def back():state.update(screen='profile',retained=False)
+    p.driver.find_elements.side_effect=find;p.driver.back.side_effect=back;p._click=Mock(side_effect=click)
+    p._profile_owner=Mock(side_effect=lambda:None if state['screen']=='profile' else (_ for _ in ()).throw(UIError('account_mismatch')))
+    p._open_own_profile()
+    assert state['screen']=='profile';p.driver.back.assert_called_once()

@@ -31,8 +31,14 @@ class InstagramPublisher(PlatformPublisher):
         if found:
             self.guard.check();self.driver.back();self._settle(.5)
 
+    def _dismiss_own_reels(self):
+        title=self.driver.find_elements('id',self._id('clips_viewer_action_bar_title').value)
+        if len(title)==1 and title[0].text=='Ваши видео Reels':
+            self.guard.check();self.driver.back();self._settle(.5)
+
     def _open_own_profile(self):
         self._dismiss_account_switcher()
+        self._dismiss_own_reels()
         # The dedicated own-Reels viewer has no bottom navigation bar.
         if (self.driver.find_elements('id',self._id('clips_viewer_action_bar_title').value)
                 and not self.driver.find_elements('id',self._id('profile_tab').value)):
@@ -48,7 +54,7 @@ class InstagramPublisher(PlatformPublisher):
         self._click(self._id('feed_tab'))
         self._settle(.5)
         self._click(self._id('profile_tab'))
-        self._settle(.5);self._dismiss_account_switcher()
+        self._settle(.5);self._dismiss_account_switcher();self._dismiss_own_reels()
         # Instagram preserves each tab's navigation stack. Its own-post viewer
         # must be closed explicitly; a tab switch alone does not reset it.
         for _ in range(3):
