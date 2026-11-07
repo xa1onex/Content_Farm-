@@ -13,7 +13,7 @@ def number(value,default=0):
 def observe(folder,metadata=None):
     folder=Path(folder);state=json.loads((folder/'state.json').read_text())
     row={'id':state['id'],'status':state['status'],'created':state.get('created',''),'retry_at':state.get('retry_at',0),
-         'duration':number((metadata or {}).get('duration')),'requested':state.get('clip_count') or 8}
+         'duration':number((metadata or {}).get('duration')),'requested':state.get('clip_count') or 8,'analysis_only':bool(state.get('analysis_only') and not state.get('selection_confirmed'))}
     source=next((p for p in folder.glob('source.*') if p.stem=='source' and p.suffix in ('.mp4','.mkv','.webm','.mov')),None)
     row['source_ready']=bool(source)
     if source:
@@ -70,6 +70,10 @@ def remaining(row,ratio=None,render_rate=None):
         # The CPU establishes the source language while the GPU starts prefetch.
         low+=180;high+=900
     if selected is None and not row.get('manifest'):low+=60;high+=300
+    if row.get('analysis_only'):
+        if not known:low*=.5;high*=3
+        stage='analyze' if transcribed else 'transcribe' if source_ready else 'download'
+        return max(15,round(low)),max(30,round(high)),stage,'measured' if measured and known else 'rough'
     unfinished=max(0,count-row.get('rendered',0))
     low+=unfinished*(max(10,render_rate*.75) if render_rate else 45)
     high+=unfinished*(render_rate*1.5 if render_rate else 300)
@@ -106,7 +110,7 @@ def estimate(rows,at=None,previous_ratio=None):
               'wait_min_seconds':round(wait_low),'wait_max_seconds':round(wait_high),
               'remaining_min_seconds':round(wait_low+lo),'remaining_max_seconds':round(wait_high+hi),
               'finish_earliest':iso(at+wait_low+lo),'finish_latest':iso(at+wait_high+hi),'confidence':confidence,
-              'source_duration_seconds':round(number(row.get('duration'))),'parts_done':row.get('parts',0),
+              'target':'analysis' if row.get('analysis_only') else 'clips','source_duration_seconds':round(number(row.get('duration'))),'parts_done':row.get('parts',0),
               'parts_total':math.ceil(number(row.get('duration'))/600) if row.get('duration') else None}
         items.append(item);wait_low+=lo;wait_high+=hi
     return {'at':iso(at),'items':items}

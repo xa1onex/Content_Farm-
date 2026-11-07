@@ -21,6 +21,9 @@ _whisper = None
 class ProcessingError(RuntimeError):
     pass
 
+class AwaitingSelection(ProcessingError):
+    pass
+
 class NoMoreMoments(ProcessingError):
     pass
 
@@ -405,12 +408,24 @@ def process_job(job_dir, progress=lambda text:None):
     if selection_file.exists():
         segments=validate_segments(json.loads(selection_file.read_text()),duration,limit=MAX_CLIPS,excluded=excluded)
         passes=state.get('analysis',{}).get('passes',1)
+        requested=state.get('clip_count')
+        if state.get('selection_confirmed') and requested:
+            if requested>len(segments):
+                extra,extra_passes=analyze_candidates(transcript,duration,count=requested-len(segments),excluded=[*excluded,*segments],feedback=feedback)
+                segments=validate_segments([*segments,*extra],duration,limit=requested,excluded=excluded);passes+=extra_passes
+            else:segments=segments[:requested]
     else:segments,passes=analyze_candidates(transcript,duration,count=state.get('clip_count'),excluded=excluded,feedback=feedback)
     state=json.loads((job_dir/'state.json').read_text())
     state['analysis']={'selected':len(segments),'requested':state.get('clip_count'),'additional':bool(parent_id),'excluded':len(excluded),'feedback_examples':len(feedback),'passes':passes,'mode':'deep' if state.get('clip_count') or parent_id else 'auto'}
     save_private_json(job_dir/'state.json',state)
     if not segments:raise NoMoreMoments('Новых законченных моментов не найдено. Старые фрагменты не повторялись.')
     save_private_json(selection_file,segments)
+    if state.get('analysis_only') and not state.get('selection_confirmed'):
+        state['analysis']['candidates']=segments
+        state['analysis']['source_duration_seconds']=duration
+        state['analysis_completed_at']=__import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat()
+        save_private_json(job_dir/'state.json',state)
+        raise AwaitingSelection('Анализ готов. Найдено моментов: '+str(len(segments))+'. Выбери количество в панели.')
     from clip_identity import finish_output
     clips = []
     for i,seg in enumerate(segments):

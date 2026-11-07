@@ -66,11 +66,13 @@ def decide(clip_id:uuid.UUID,data:Decision,request:Request,s=DB):
         key='review_approved:'+str(clip.id)
         if not s.get(Setting,key):s.add(Setting(key=key,value={'user_id':g['user_id'],'at':now().isoformat()}))
         s.flush()
-    feedback_record(s,clip,g['user_id'],FeedbackInput(rating=1 if data.decision=='approved' else -1 if data.decision=='deleted' else None,comment=data.comment))
+    if data.comment is not None:feedback_record(s,clip,g['user_id'],FeedbackInput(comment=data.comment))
     if data.decision=='deleted':
         key='review_deleted:'+str(clip.id)
         if not s.get(Setting,key):s.add(Setting(key=key,value={'user_id':g['user_id'],'at':now().isoformat()}))
         clip.status='archived'
+        from app.content.moderation import pause_waiting
+        pause_waiting(s,clip.id,'moderation_deleted')
     s.flush()
     return {'saved':True,'items':items(s,g['user_id'])}
 

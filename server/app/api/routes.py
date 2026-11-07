@@ -425,6 +425,7 @@ def rotate_worker_token(worker_id:UUID,request:Request,s=DB,actor=ADMIN):
     s.add(item);s.flush();return {'worker_id':worker_id,'token_id':item.id,'token':raw}
 
 class FarmEstimate(Input):
+    target:Literal['analysis','clips']='clips'
     job_id:str=Field(pattern=r'^[a-f0-9]{12}$')
     queue_position:int=Field(ge=1,le=100)
     stage:Literal['queued','download','transcribe','analyze','render','upload','register','deliver']

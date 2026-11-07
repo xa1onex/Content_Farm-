@@ -30,7 +30,7 @@ def snapshot():
             original=next((v for k,v in state.get('drive_files',{}).items() if k.startswith('source.')),None)
             if original:url='https://drive.google.com/file/d/'+original['id']+'/view'
         if source.get('kind') in ('drive','youtube') or source.get('kind')=='telegram' and url.startswith('https://'):
-            jobs.append({'id':state['id'],'user_id':state['user_id'],'url':url,'status':state['status'],'created':state.get('created'),'stage':state.get('stage',''),'title':state.get('details',{}).get('title','Видео'),'analysis':state.get('analysis',{}),'clip_count':state.get('clip_count'),'error_message':state.get('error_message')})
+            jobs.append({'id':state['id'],'user_id':state['user_id'],'url':url,'status':state['status'],'created':state.get('created'),'stage':state.get('stage',''),'title':state.get('details',{}).get('title','Видео'),'analysis':state.get('analysis',{}),'analysis_only':bool(state.get('analysis_only') and not state.get('selection_confirmed')),'clip_count':state.get('clip_count'),'error_message':state.get('error_message'),'processing_started_at':state.get('processing_started_at'),'completed_at':state.get('completed_at'),'analysis_completed_at':state.get('analysis_completed_at'),'render_requested_at':state.get('render_requested_at')})
         if state['status'] in ('queued','processing','retry_wait','interrupted'):
             active.append({'id':state['id'],'stage':state.get('stage','Обработка видео')})
     return {'counts':dict(counts),'jobs':sorted(jobs,key=lambda j:j.get('created') or '',reverse=True)[:100],'active':active[:20],'disk_free_gb':round(shutil.disk_usage(JOB_DIR).free/1024**3,2)}

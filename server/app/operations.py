@@ -95,7 +95,7 @@ def overview(s):
         items=[i for i in timing.get('items',[]) if i['job_id'] in active_ids]
         farm_data['active']=[{'id':i['job_id'],'stage':i['job_id']+' · '+stages[i['stage']]+
             (' · '+str(i['parts_done'])+'/'+str(i['parts_total'])+' частей' if i['stage']=='transcribe' and i.get('parts_total') else '')+
-            '\nДо готовых роликов: примерно '+span(i['remaining_min_seconds'],i['remaining_max_seconds'])} for i in items]
+            ('\nДо завершения анализа: примерно ' if i.get('target')=='analysis' else '\nДо готовых роликов: примерно ')+span(i['remaining_min_seconds'],i['remaining_max_seconds'])} for i in items]
         if items:farm_data['active'].append({'id':'queue-total','stage':'Вся очередь: примерно '+span(max(i['remaining_min_seconds'] for i in items),max(i['remaining_max_seconds'] for i in items))+' до готовности. Включены обработка, сохранение и доставка.'})
     scheduler=s.get(Setting,'scheduler_heartbeat');control=s.get(Setting,'scheduler')
     scheduler_data={'enabled':control.value.get('enabled',True) if control else True,

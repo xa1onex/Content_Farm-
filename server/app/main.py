@@ -38,6 +38,8 @@ from app.editorial import router as editorial_router
 app.include_router(editorial_router)
 from app.review import router as review_router
 app.include_router(review_router)
+from app.workspace_api import router as workspace_router
+app.include_router(workspace_router)
 
 @app.middleware('http')
 async def request_context(request:Request,call_next):

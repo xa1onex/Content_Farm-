@@ -19,7 +19,7 @@ from aiogram.types import FSInputFile
 
 from config import BASE_DIR, JOB_DIR, MAX_QUEUE_SIZE, TELEGRAM_INPUT_BYTES, AUTOPOST_ENABLED, MAX_USER_JOBS
 from drive_helper import archive_job, save_private_json
-from processor import process_job, ProcessingError, TransientProcessingError, NoMoreMoments
+from processor import process_job, ProcessingError, TransientProcessingError, NoMoreMoments, AwaitingSelection
 from autopost import register_job
 from sources import parse_source
 from operations import recovery_changes, report_loop
@@ -160,7 +160,7 @@ async def worker(bot):
         status_message = None
         reporter = ProgressReporter(loop,None)
         try:
-            update_state(job_dir,status='processing',error=None,stage='Создаю ролики')
+            update_state(job_dir,status='processing',error=None,stage='Анализирую исходник' if state.get('analysis_only') and not state.get('selection_confirmed') else 'Создаю ролики',processing_started_at=datetime.now(timezone.utc).isoformat())
             try:
                 status_message = await reply(bot,state['chat_id'],f'⏳ Задание <code>{state["id"]}</code>: начинаю обработку.')
             except TelegramAPIError:
@@ -191,7 +191,7 @@ async def worker(bot):
             state = load_state(job_dir)
             reporter.done = True
             if state.get('archived') and state.get('delivered') and (not AUTOPOST_ENABLED or state.get('registered')):
-                update_state(job_dir,status='completed')
+                update_state(job_dir,status='completed',completed_at=datetime.now(timezone.utc).isoformat())
                 clean_archived_job(job_dir)
                 await reporter.edit('✅ Ролики отправлены. Исходник, субтитры и результаты сохранены на Google Диске.',final=True)
             else:
@@ -204,6 +204,10 @@ async def worker(bot):
         except asyncio.CancelledError:
             update_state(job_dir,status='interrupted')
             raise
+        except AwaitingSelection as exc:
+            reporter.done=True
+            update_state(job_dir,status='analysis_ready',stage='Анализ готов: выбери количество роликов')
+            await reporter.edit(html.escape(str(exc)),final=True)
         except NoMoreMoments as exc:
             reporter.done=True
             update_state(job_dir,status='exhausted',stage='Новых моментов не найдено',error_message=str(exc))
@@ -317,7 +321,7 @@ async def feedback_click(query:types.CallbackQuery):
     rating=1 if action=='up' else -1
     result=await control.api('POST','/api/v1/telegram/editorial-feedback',{'passport':code,'user_id':query.from_user.id,'rating':rating})
     if 'error' in result:await query.answer('Не удалось сохранить оценку. Попробуй позже.',show_alert=True);return
-    await query.answer('Дизлайк сохранён. Публикация запрещена.' if rating==-1 else 'Оценка сохранена. Учтём при следующем подборе.')
+    await query.answer('Дизлайк сохранён для ИИ. Решение о публикации принимается отдельно.' if rating==-1 else 'Оценка сохранена. Учтём при следующем подборе.')
     try:await query.message.edit_reply_markup(reply_markup=feedback_keyboard(code,rating))
     except TelegramAPIError:pass
 
@@ -330,7 +334,7 @@ async def feedback_reply(message:types.Message,bot:Bot):
     result=await control.api('POST','/api/v1/telegram/editorial-feedback',{'passport':code.group(),'user_id':message.from_user.id,'comment':message.text[:1000]})
     await message.answer('Комментарий сохранён. Он будет учтён при следующем подборе моментов и описаний.' if 'error' not in result else 'Не удалось сохранить комментарий. Попробуй позже.')
 
-async def submit(message:types.Message,bot:Bot,request_id=None,clip_count=None,parent_job_id=None,retry_job_id=None,quiet=False):
+async def submit(message:types.Message,bot:Bot,request_id=None,clip_count=None,parent_job_id=None,retry_job_id=None,quiet=False,analysis_only=False,render_job_id=None):
     if not message.from_user or message.chat.type!='private':
         await message.answer('Отправь видео в личный чат с ботом.')
         return
@@ -351,6 +355,19 @@ async def submit(message:types.Message,bot:Bot,request_id=None,clip_count=None,p
             previous=load_state(JOB_DIR/requested_id)
             if previous.get('miniapp_request_id')!=request_id or previous['user_id']!=message.from_user.id:raise RuntimeError('Request identity conflict')
             return {'job_id':requested_id,'status':previous['status']}
+        if render_job_id:
+            if not __import__('re').fullmatch(r'[0-9a-f]{12}',render_job_id):raise ValueError('Некорректное задание')
+            path=JOB_DIR/render_job_id
+            if not (path/'state.json').exists():raise ValueError('Задание не найдено')
+            previous=load_state(path)
+            if previous.get('user_id')!=message.from_user.id:raise ValueError('Задание принадлежит другому пользователю')
+            if previous.get('render_request_id')==request_id:return {'job_id':render_job_id,'status':previous['status']}
+            if previous['status']!='analysis_ready' or not (path/'selection.json').exists():raise ValueError('Сначала дождись завершения анализа')
+            if type(clip_count) is not int or not 1<=clip_count<=20:raise ValueError('Выбери от 1 до 20 роликов')
+            if queue.full():raise ValueError('Очередь заполнена. Попробуй через минуту')
+            update_state(path,status='queued',clip_count=clip_count,selection_confirmed=True,render_request_id=request_id,render_requested_at=datetime.now(timezone.utc).isoformat())
+            scheduled.add(render_job_id);busy_users.add(message.from_user.id);queue.put_nowait(path)
+            return {'job_id':render_job_id,'status':'queued'}
         if retry_job_id:
             path=JOB_DIR/retry_job_id
             if not (path/'state.json').exists() or load_state(path).get('user_id')!=message.from_user.id:raise ValueError('Задание не найдено')
@@ -359,7 +376,7 @@ async def submit(message:types.Message,bot:Bot,request_id=None,clip_count=None,p
                 update_state(path,status='queued',retry_at=None,auto_retry_count=0)
                 scheduled.add(retry_job_id);queue.put_nowait(path)
             return {'job_id':retry_job_id,'status':load_state(path)['status']}
-        active=sum(st.get('status') in ('receiving','queued','processing','retry_wait','interrupted') for _,st in user_jobs(message.from_user.id))
+        active=sum(st.get('status') in ('receiving','queued','processing','retry_wait','interrupted','analysis_ready') for _,st in user_jobs(message.from_user.id))
         if active>=MAX_USER_JOBS or queue.full():
             raise ValueError('Очередь заполнена. Можно держать до 10 своих заданий одновременно.')
         if clip_count is not None and (type(clip_count) is not int or not 1<=clip_count<=20):raise ValueError('Выбери от 1 до 20 моментов')
@@ -388,7 +405,7 @@ async def submit(message:types.Message,bot:Bot,request_id=None,clip_count=None,p
         job_dir.mkdir(parents=True,mode=0o700)
         state = {'id':job_id,'user_id':message.from_user.id,'chat_id':message.chat.id,
             'source':source,'status':'receiving','created':datetime.now(timezone.utc).isoformat(),
-            'archived':False,'delivered':False,'miniapp_request_id':request_id,'clip_count':clip_count,'parent_job_id':parent_job_id,'root_job_id':load_state(JOB_DIR/parent_job_id).get('root_job_id',parent_job_id) if parent_job_id else job_id}
+            'archived':False,'delivered':False,'miniapp_request_id':request_id,'analysis_only':analysis_only,'clip_count':clip_count,'parent_job_id':parent_job_id,'root_job_id':load_state(JOB_DIR/parent_job_id).get('root_job_id',parent_job_id) if parent_job_id else job_id}
         save_private_json(job_dir/'state.json',state)
         busy_users.add(message.from_user.id)
         try:

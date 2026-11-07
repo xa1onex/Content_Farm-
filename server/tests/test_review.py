@@ -27,7 +27,7 @@ def test_review_decisions_persist_and_feed_editorial_memory(client,seeded):
         assert s.get(Job,seeded['job']).status=='paused'
         assert blocked(s,seeded['clip'])
         f=s.get(Setting,'editorial_feedback:'+str(seeded['clip'])+':123').value
-        assert f['rating']==-1 and f['comment']=='Начало затянуто'
+        assert f['rating']==0 and f['comment']=='Начало затянуто'
     assert client.post(base,headers=headers(),json={'decision':'approved'}).status_code==409
     assert client.post(base,headers=headers(),json={'comment':'Без развязки'}).status_code==200
     assert client.post(base,headers=headers(),json={'comment':'a'*1001}).status_code==422

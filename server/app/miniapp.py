@@ -99,6 +99,8 @@ def state(s=DB,actor=ADMIN):
         'remaining_max_seconds':max((e['remaining_max_seconds'] for e in active_etas),default=0),
         'job_count':len(active_etas)}
     data['feedback']=[v.value for v in s.scalars(select(Setting).where(Setting.key.like('editorial_feedback:%'))) if v.value.get('user_id')==user]
+    from app.workspace import snapshot
+    data.update(snapshot(s,actor,data))
     return data
 
 class SourceInput(BaseModel):

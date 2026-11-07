@@ -12,7 +12,7 @@ router=APIRouter();DB=Depends(db_session,scope='function');ADMIN=Depends(roles('
 def uid(actor):
     if not str(actor.id).startswith('telegram:'):raise HTTPException(403,'Открой форму через Telegram')
     return int(str(actor.id).split(':')[1])
-def queue_requests(s,user,urls,count=None,parent=None,retry=None):
+def queue_requests(s,user,urls,count=None,parent=None,retry=None,mode='create',render=None):
     values=list(dict.fromkeys(v.strip() for v in urls))
     if not 1<=len(values)<=10:raise HTTPException(422,'За один раз можно добавить от 1 до 10 ссылок')
     for value in values:
@@ -21,15 +21,17 @@ def queue_requests(s,user,urls,count=None,parent=None,retry=None):
         try:port=u.port
         except ValueError:raise HTTPException(422,'Некорректный адрес')
         if u.scheme!='https' or u.username or u.password or port not in (None,443) or u.hostname not in ('youtube.com','www.youtube.com','m.youtube.com','youtu.be','drive.google.com'):raise HTTPException(422,'Нужны ссылки YouTube или Google Диска')
+    if mode not in ('create','analyze','render'):raise HTTPException(422,'Неизвестный этап обработки')
     lock(s,'miniapp-farm:'+str(user))
     pending=[v.value for v in s.scalars(select(Setting).where(Setting.key.like('miniapp_farm:%'))) if v.value.get('user_id')==user and v.value.get('status') in ('pending','leased')]
     heartbeat=s.get(Setting,'farm_heartbeat')
-    active={j['id'] for j in (heartbeat.value.get('jobs',[]) if heartbeat else []) if j.get('user_id')==user and j.get('status') in ('receiving','queued','processing','retry_wait','interrupted')}
+    active={j['id'] for j in (heartbeat.value.get('jobs',[]) if heartbeat else []) if j.get('user_id')==user and j.get('status') in ('receiving','queued','processing','retry_wait','interrupted','analysis_ready')}
+    if render:active.discard(render)
     if len(pending)+len(active)+len(values)>10:raise HTTPException(409,'Можно держать до 10 заданий одновременно. Сейчас свободно мест: '+str(max(0,10-len(pending)-len(active))))
-    if not parent and not retry and any(v.get('url') in values and not v.get('parent_job_id') for v in pending):raise HTTPException(409,'Эта ссылка уже передаётся в обработку')
+    if not parent and not retry and not render and any(v.get('url') in values and not v.get('parent_job_id') for v in pending):raise HTTPException(409,'Эта ссылка уже передаётся в обработку')
     result=[]
     for value in values:
-        identifier=str(uuid.uuid4());s.add(Setting(key='miniapp_farm:'+identifier,value={'user_id':user,'url':value,'clip_count':count,'parent_job_id':parent,'retry_job_id':retry,'status':'pending','created_at':now().isoformat(),'attempts':0}))
+        identifier=str(uuid.uuid4());s.add(Setting(key='miniapp_farm:'+identifier,value={'user_id':user,'url':value,'clip_count':count,'parent_job_id':parent,'retry_job_id':retry,'mode':mode,'render_job_id':render,'status':'pending','created_at':now().isoformat(),'attempts':0}))
         result.append({'id':identifier,'status':'pending'})
     return result
 class BatchInput(BaseModel):
@@ -68,8 +70,6 @@ def feedback_record(s,clip,user,data):
     if row:row.value=value
     else:s.add(Setting(key=key,value=value))
     s.flush()
-    from app.content.moderation import blocked,pause_waiting
-    if blocked(s,clip.id):pause_waiting(s,clip.id)
     return value
 @router.post('/api/v1/miniapp/content/{clip_id}/feedback')
 @idempotent
