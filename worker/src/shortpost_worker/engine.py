@@ -67,6 +67,35 @@ class Engine:
         if not path:raise UIError('profile_not_configured')
         profile=Profile.load(path)
         return PUBLISHERS[assignment.account.platform](profile,driver,adb,guard,self.config.state_dir/'artifacts')
+    async def configure_instagram_visibility(self,publisher,assignment,proof):
+        if assignment.account.platform!='instagram' or not hasattr(publisher,'hide_public_counts'):return
+        # The upload is already durably acknowledged. Visibility failures must
+        # never turn a published clip into an uncertain job or another upload.
+        publisher.guard=ReadGuard(self.api,300)
+        account=assignment.account.username
+        backlog_path=self.config.state_dir/'instagram-visibility-backlog.json'
+        backlog=json.loads(backlog_path.read_text(encoding='utf-8')) if backlog_path.exists() else {}
+        urls=list(dict.fromkeys([proof['url']]+backlog.get(account,[])))
+        report=[]
+        for url in urls:
+            try:
+                publisher.guard.check()
+                if url!=proof['url']:
+                    from .platforms.base import canonical_post
+                    canonical_post('instagram',url,account)
+                    await asyncio.to_thread(publisher.adb.shell,'am','start','-a','android.intent.action.VIEW','-d',url,'-p',publisher.profile.package)
+                    await asyncio.to_thread(publisher._settle,2)
+                result=await asyncio.to_thread(publisher.hide_public_counts,{'url':url})
+                report.append(result)
+                backlog[account]=[u for u in backlog.get(account,[]) if u!=url]
+            except Exception as exc:
+                report.append({'url':url,'error_code':getattr(exc,'code','visibility_error')})
+                backlog[account]=list(dict.fromkeys(backlog.get(account,[])+[url]))
+                log.warning('visibility_pending account=%s code=%s',account,getattr(exc,'code','visibility_error'))
+        temporary=backlog_path.with_suffix('.tmp');temporary.write_text(json.dumps(backlog,ensure_ascii=False),encoding='utf-8');temporary.replace(backlog_path)
+        directory=self.config.state_dir/'artifacts'/(str(assignment.job.id)+'-'+str(assignment.job.attempts));directory.mkdir(parents=True,exist_ok=True)
+        (directory/'visibility.json').write_text(json.dumps(report,ensure_ascii=False),encoding='utf-8')
+
     async def process(self,raw):
         assignment=Assignment.model_validate(raw)
         identifier=str(assignment.job.id);attempt=assignment.job.attempts
@@ -134,6 +163,14 @@ class Engine:
             payload=lease_event(assignment,outcome='published',external_id=proof['external_id'],url=proof['url'],published_at=self.api.clock.iso())
             self.journal.record_result(identifier,attempt,payload)
             await self.report(self.journal.job(identifier,attempt))
+            if self.journal.job(identifier,attempt)['stage']=='published':
+                if renewal:
+                    renewal.cancel()
+                    try:await renewal
+                    except (asyncio.CancelledError,Exception):pass
+                    renewal=None
+                try:await self.configure_instagram_visibility(publisher,assignment,proof)
+                except Exception as exc:log.warning('visibility_pending job=%s type=%s',identifier,type(exc).__name__)
         except (Exception,asyncio.CancelledError) as exc:
             code=exc.code if isinstance(exc,WorkerError) else ('worker_cancelled' if isinstance(exc,asyncio.CancelledError) else 'worker_internal_error')
             log.error('job_error code=%s type=%s job=%s attempt=%s',code,type(exc).__name__,identifier,attempt)

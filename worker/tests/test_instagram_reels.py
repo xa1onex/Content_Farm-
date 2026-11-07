@@ -391,3 +391,34 @@ def test_inline_caption_proof_rejects_ambiguous_duplicates(tmp_path):
     p.driver.find_elements.return_value=[Mock(),Mock()]
     with pytest.raises(UIError,match='ambiguous_ui_selector'):p._read_reels_viewer('Описание ролика')
     p.driver.set_clipboard_text.assert_not_called()
+
+
+def test_hide_counts_checks_exact_post_before_any_setting(tmp_path):
+    p=publisher(tmp_path);p.read_open_reel=Mock(return_value={'url':'https://www.instagram.com/reel/OTHER/'})
+    p._visibility_controls=Mock()
+    with pytest.raises(UIError,match='visibility_post_mismatch'):p.hide_public_counts({'url':'https://www.instagram.com/reel/EXPECTED/'})
+    p._visibility_controls.assert_not_called()
+
+
+def test_hide_counts_is_idempotent_and_never_disables_comments(tmp_path):
+    p=publisher(tmp_path);url='https://www.instagram.com/reel/OWN/'
+    p.read_open_reel=Mock(return_value={'url':url});p._visibility_controls=Mock();p._close_visibility_controls=Mock()
+    hidden=set();clicked=[]
+    def find(by,value):
+        key='likes' if 'Нравится' in value else 'shares'
+        if 'starts-with' in value:
+            return [SimpleNamespace(is_displayed=lambda:True)] if key in hidden else []
+        def click():hidden.add(key);clicked.append(value)
+        return [] if key in hidden else [SimpleNamespace(click=click)]
+    p.driver.find_elements.side_effect=find
+    assert p.hide_public_counts({'url':url})=={'url':url,'likes':'hidden','shares':'hidden'}
+    assert len(clicked)==2 and all('Выключить' not in text for text in clicked)
+    assert p.hide_public_counts({'url':url})['shares']=='hidden'
+    assert len(clicked)==2
+
+
+def test_visibility_requires_proof_of_changed_setting(tmp_path):
+    p=publisher(tmp_path);url='https://www.instagram.com/reel/OWN/'
+    p.read_open_reel=Mock(return_value={'url':url});p._visibility_controls=Mock();p._close_visibility_controls=Mock()
+    p.driver.find_elements.return_value=[]
+    with pytest.raises(UIError,match='visibility_not_confirmed'):p.hide_public_counts({'url':url})

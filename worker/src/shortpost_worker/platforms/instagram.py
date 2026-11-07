@@ -201,6 +201,45 @@ class InstagramPublisher(PlatformPublisher):
             return {'external_id':external_id,'url':url}
         finally:self._dismiss_share()
 
+    def _visibility_controls(self):
+        title=Locator(by='xpath',value='//*[@resource-id="com.instagram.android:id/title_text_view" and @text="Управлять видео Reels"]')
+        if self.driver.find_elements(title.by,title.value):return
+        manage=Locator(by='xpath',value='//*[@resource-id="com.instagram.android:id/row_simple_text_title" and @text="Управлять"]')
+        if not self.driver.find_elements(manage.by,manage.value):
+            self._click(self._id('clips_ufi_more_button_component'));self._settle(.5)
+        self._click(manage);self._settle(.5)
+        self.find(title)
+
+    def _close_visibility_controls(self):
+        for _ in range(2):
+            known=Locator(by='xpath',value='//*[@resource-id="com.instagram.android:id/title_text_view" and @text="Управлять видео Reels"] | //*[@resource-id="com.instagram.android:id/row_simple_text_title" and @text="Управлять"]')
+            if not self.driver.find_elements(known.by,known.value):break
+            self.guard.check();self.driver.back();self._settle(.5)
+
+    def hide_public_counts(self,proof):
+        """Hide only public counts on a freshly proven own Reel, idempotently."""
+        if not self.profile.instagram_reels_452:raise UIError('visibility_profile_unsupported')
+        actual=self.read_open_reel()
+        if actual['url']!=proof['url']:raise UIError('visibility_post_mismatch')
+        result={}
+        for key,label,token in [('likes','Скрыть число отметок "Нравится" от других','Нравится'),
+                                ('shares','Скрыть число поделившихся','поделившихся')]:
+            try:
+                self._visibility_controls()
+                hide=Locator(by='xpath',value='//*[@resource-id="com.instagram.android:id/control_option_text" and @text='+xpath_literal(label)+']')
+                show=Locator(by='xpath',value='//*[@resource-id="com.instagram.android:id/control_option_text" and starts-with(@text,"Показ") and contains(@text,'+xpath_literal(token)+')]')
+                actions=self.driver.find_elements(hide.by,hide.value)
+                inverse=self.driver.find_elements(show.by,show.value)
+                if len(actions)>1 or len(inverse)>1 or (actions and inverse):raise UIError('ambiguous_ui_selector')
+                if actions:
+                    self.guard.check();actions[0].click();self._settle(.5)
+                    self._visibility_controls()
+                    inverse=self.driver.find_elements(show.by,show.value)
+                if len(inverse)!=1 or not inverse[0].is_displayed():raise UIError('visibility_not_confirmed')
+                result[key]='hidden'
+            finally:self._close_visibility_controls()
+        return {'url':proof['url'],**result}
+
     def verify_account(self,assignment):
         if self.profile.instagram_reels_452:
             self.guard.check();self.driver.activate_app(self.profile.package);self._dismiss_share()

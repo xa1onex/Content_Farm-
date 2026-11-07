@@ -267,3 +267,19 @@ async def test_health_reconnects_respect_the_sequential_ui_lock(config,journal,a
     monkeypatch.setattr('shortpost_worker.engine.asyncio.sleep',no_sleep)
     try:await engine.health_loop()
     finally:await api.close()
+
+
+@pytest.mark.asyncio
+async def test_visibility_failure_keeps_published_result_and_pending_retry(config,journal,assignment,monkeypatch):
+    from unittest.mock import Mock
+    assignment['account']['platform']='instagram'
+    backend,api,engine,clicks=setup(config,journal,assignment,monkeypatch)
+    publisher=engine.publisher_factory(None,None,None,None,None)
+    publisher.hide_public_counts=Mock(side_effect=UIError('visibility_not_confirmed'))
+    await engine.process(assignment)
+    assert backend.status=='published' and len(backend.results)==1
+    row=journal.job(assignment['job']['id'],assignment['job']['attempts']);assert row['stage']=='published'
+    pending=json.loads((config.state_dir/'instagram-visibility-backlog.json').read_text())
+    assert pending[assignment['account']['username']]
+    assert journal.control('paused')!='1'
+    await api.close()
