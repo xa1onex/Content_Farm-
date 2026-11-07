@@ -142,3 +142,33 @@ def test_profile_recovery_never_backs_out_of_a_publication_composer(tmp_path):
     p.driver.find_elements.side_effect=find
     with pytest.raises(UIError,match='account_mismatch'):p._open_own_profile()
     p.driver.back.assert_not_called()
+
+
+def test_first_reels_disclosure_continues_same_submission_once(tmp_path):
+    p=publisher(tmp_path);share=Mock();notice=Mock();authorize=Mock()
+    p.find=Mock(side_effect=[share,notice]);p.text=Mock(side_effect=['О Reels','Описание ролика'])
+    p.submit(authorize)
+    authorize.assert_called_once();share.click.assert_called_once();notice.click.assert_called_once()
+
+
+def test_normal_reels_without_disclosure_has_exactly_one_submit(tmp_path):
+    p=publisher(tmp_path);share=Mock();authorize=Mock()
+    p.find=Mock(side_effect=[share,UIError('ui_selector_missing')])
+    p.submit(authorize)
+    authorize.assert_called_once();share.click.assert_called_once()
+
+
+@pytest.mark.parametrize('title,caption',[('Другой экран','Описание ролика'),('О Reels','Другая подпись')])
+def test_unknown_disclosure_or_changed_caption_never_clicks_final_share(tmp_path,title,caption):
+    p=publisher(tmp_path);share=Mock();notice=Mock();authorize=Mock()
+    p.find=Mock(side_effect=[share,notice]);p.text=Mock(side_effect=[title,caption])
+    with pytest.raises(UIError):p.submit(authorize)
+    authorize.assert_called_once();share.click.assert_called_once();notice.click.assert_not_called()
+
+
+def test_lease_loss_before_disclosure_confirmation_stops_final_click(tmp_path):
+    p=publisher(tmp_path);share=Mock();notice=Mock();authorize=Mock()
+    p.find=Mock(side_effect=[share,notice]);p.text=Mock(side_effect=['О Reels','Описание ролика'])
+    p.guard.check.side_effect=[None,None,LeaseLost()]
+    with pytest.raises(LeaseLost):p.submit(authorize)
+    share.click.assert_called_once();notice.click.assert_not_called()

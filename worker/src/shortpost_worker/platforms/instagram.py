@@ -125,6 +125,19 @@ class InstagramPublisher(PlatformPublisher):
             self._open_latest_reel();self.before_post_id=self.read_open_reel()['external_id']
             self.guard.check();self.driver.back();self._profile_owner()
 
+    def submit(self,before_submit):
+        super().submit(before_submit)
+        if not self.profile.instagram_reels_452:return
+        # First-time accounts show a distinct disclosure after the initial click.
+        # Continue this same fenced submission once; never click Share again.
+        try:button=self.find(self._id('clips_nux_sheet_share_button'),timeout=5)
+        except UIError as exc:
+            if exc.code=='ui_selector_missing':return
+            raise
+        if self.text(self._id('clips_nux_sheet_title'))!='О Reels':raise UIError('publication_notice_unverified')
+        if self.text(self._id('caption_input_text_view'))!=self.context['caption']:raise UIError('publication_content_unverified')
+        self.guard.check();button.click()
+
     def verify_publication(self):
         if self.profile.navigation_only:raise UIError('profile_navigation_only')
         if not self.profile.instagram_reels_452:return super().verify_publication()
