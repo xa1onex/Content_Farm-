@@ -37,7 +37,7 @@ class PlatformPublisher(abc.ABC):
     allowed_parameters:set[str]=set()
     def __init__(self,profile,driver,adb,guard,artifacts):
         self.profile=profile;self.driver=driver;self.adb=adb;self.guard=guard;self.artifacts=Path(artifacts)
-        self.context={};self.baseline=set();self.assignment=None
+        self.context={};self.baseline=set();self.assignment=None;self.authorize_continue=None
     def inspect_error(self):
         for code,locator in self.profile.errors.items():
             if self.driver.find_elements(locator.by,locator.value):raise UIError(code)

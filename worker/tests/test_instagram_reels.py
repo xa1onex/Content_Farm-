@@ -301,3 +301,56 @@ def test_profile_prefers_dedicated_reels_view_when_grid_tab_is_selected(tmp_path
     p._open_latest_reel()
     assert 'preview_clip_thumbnail' in p.find.call_args.args[0].value
     p._click.assert_called_once();assert '@content-desc="Reels"' in p._click.call_args.args[0].value
+
+
+def test_caption_keyboard_is_hidden_before_publication_can_be_fenced(tmp_path):
+    p=publisher(tmp_path);p.steps=Mock();p.parameters={};p.driver.is_keyboard_shown.side_effect=[True,False]
+    p.fill_metadata();p.driver.hide_keyboard.assert_called_once();p.driver.back.assert_not_called()
+
+
+def test_caption_without_keyboard_does_not_back_out_of_composer(tmp_path):
+    p=publisher(tmp_path);p.steps=Mock();p.parameters={};p.driver.is_keyboard_shown.return_value=False
+    p.fill_metadata();p.driver.hide_keyboard.assert_not_called();p.driver.back.assert_not_called()
+
+
+def test_visible_keyboard_after_hide_stops_before_submit(tmp_path):
+    p=publisher(tmp_path);p.steps=Mock();p.parameters={};p.driver.is_keyboard_shown.return_value=True
+    with pytest.raises(UIError,match='keyboard_not_dismissed'):p.fill_metadata()
+    p.driver.hide_keyboard.assert_called_once()
+
+
+def test_first_next_can_continue_to_disclosure_but_final_share_is_clicked_once(tmp_path):
+    p=publisher(tmp_path);first=Mock();next_button=Mock();notice=Mock();before=Mock()
+    first.get_attribute.return_value='Далее';next_button.get_attribute.return_value='Далее';next_button.is_enabled.return_value=True
+    p.find=Mock(side_effect=[first,UIError('ui_selector_missing'),next_button,notice])
+    p.text=Mock(side_effect=['Новое видео Reels','Описание ролика','О Reels','Описание ролика']);p.authorize_continue=Mock()
+    p.submit(before)
+    before.assert_called_once();first.click.assert_called_once();next_button.click.assert_called_once();notice.click.assert_called_once()
+    assert p.authorize_continue.call_count==2
+
+
+def test_final_share_is_not_repeated_when_disclosure_does_not_appear(tmp_path):
+    p=publisher(tmp_path);share=Mock();share.get_attribute.return_value='Поделиться'
+    p.find=Mock(side_effect=[share,UIError('ui_selector_missing')]);p.authorize_continue=Mock()
+    p.submit(Mock());share.click.assert_called_once();p.authorize_continue.assert_not_called();assert p.find.call_count==2
+
+
+def test_editorial_veto_before_first_reels_final_confirmation_blocks_share(tmp_path):
+    from shortpost_worker.errors import WorkerError
+    p=publisher(tmp_path);first=Mock();notice=Mock()
+    p.find=Mock(side_effect=[first,notice]);p.text=Mock(side_effect=['О Reels','Описание ролика'])
+    p.authorize_continue=Mock(side_effect=WorkerError('editorial_rejected'))
+    with pytest.raises(WorkerError,match='editorial_rejected'):p.submit(Mock())
+    first.click.assert_called_once();notice.click.assert_not_called()
+
+
+def test_next_continuation_never_clicks_a_button_that_has_become_share(tmp_path):
+    p=publisher(tmp_path);first=Mock();current=Mock();first.get_attribute.return_value='Далее';current.get_attribute.return_value='Поделиться'
+    p.find=Mock(side_effect=[first,UIError('ui_selector_missing'),current]);p.authorize_continue=Mock()
+    p.submit(Mock());first.click.assert_called_once();current.click.assert_not_called();p.authorize_continue.assert_not_called()
+
+
+def test_pending_processing_blocks_extra_next_navigation(tmp_path):
+    p=publisher(tmp_path);first=Mock();current=Mock();first.get_attribute.return_value='Далее';current.get_attribute.return_value='Далее';current.is_enabled.return_value=True
+    p.find=Mock(side_effect=[first,UIError('ui_selector_missing'),current]);p.driver.find_elements.return_value=[Mock()];p.authorize_continue=Mock()
+    p.submit(Mock());first.click.assert_called_once();current.click.assert_not_called();p.authorize_continue.assert_not_called()

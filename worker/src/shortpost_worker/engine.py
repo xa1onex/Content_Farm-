@@ -116,7 +116,7 @@ class Engine:
             self.journal.stage(identifier,attempt,'prepared')
             if not self.config.allow_publish:raise WorkerError('publishing_not_enabled')
             loop=asyncio.get_running_loop()
-            def authorize_and_mark():
+            def authorize_only():
                 guard.check()
                 future=asyncio.run_coroutine_threadsafe(self.api.mutate('authorize-submit',
                     f'/jobs/{identifier}/authorize-submit',lease_event(assignment)),loop)
@@ -125,7 +125,10 @@ class Engine:
                 except Exception:
                     future.cancel();raise WorkerError('publication_permission_denied') from None
                 if not approved.get('allowed'):raise WorkerError('editorial_rejected' if approved.get('reason')=='editorial_rejected' else 'publication_permission_denied')
-                guard.check();self.journal.mark_irreversible(identifier,attempt)
+                guard.check()
+            def authorize_and_mark():
+                authorize_only();self.journal.mark_irreversible(identifier,attempt)
+            publisher.authorize_continue=authorize_only
             await asyncio.to_thread(publisher.submit,authorize_and_mark)
             proof=await asyncio.to_thread(publisher.verify_publication)
             payload=lease_event(assignment,outcome='published',external_id=proof['external_id'],url=proof['url'],published_at=self.api.clock.iso())

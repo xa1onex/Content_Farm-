@@ -209,18 +209,47 @@ class InstagramPublisher(PlatformPublisher):
             'username':assignment.account.username,'before_count':self.before_post_count,
             'before_post_id':self.before_post_id,'checked_at':time.time()}),encoding='utf-8')
 
-    def submit(self,before_submit):
-        super().submit(before_submit)
+    def fill_metadata(self):
+        super().fill_metadata()
         if not self.profile.instagram_reels_452:return
-        # First-time accounts show a distinct disclosure after the initial click.
-        # Continue this same fenced submission once; never click Share again.
-        try:button=self.find(self._id('clips_nux_sheet_share_button'),timeout=5)
+        # Caption input can move the final button and leave the IME over it.
+        # Finish that layout change before fencing the only submission click.
+        self._settle(1)
+        if self.driver.is_keyboard_shown():
+            self.guard.check();self.driver.hide_keyboard();self._settle(.5)
+        if self.driver.is_keyboard_shown():raise UIError('keyboard_not_dismissed')
+
+    def _authorize_continuation(self):
+        self.guard.check()
+        if self.authorize_continue:self.authorize_continue()
+        self.guard.check()
+
+    def submit(self,before_submit):
+        if not self.profile.instagram_reels_452:return super().submit(before_submit)
+        if self.profile.navigation_only:raise UIError('profile_navigation_only')
+        button=self.find(self.profile.submit)
+        label=button.get_attribute('content-desc') or button.text
+        self.guard.check();before_submit();self.guard.check();button.click()
+        notice=self._id('clips_nux_sheet_share_button')
+        try:confirmation=self.find(notice,timeout=5)
         except UIError as exc:
-            if exc.code=='ui_selector_missing':return
-            raise
+            if exc.code!='ui_selector_missing':raise
+            if label!='Далее':return  # A real Share action is never repeated.
+            try:next_button=self.find(self.profile.submit,timeout=2)
+            except UIError as missing:
+                if missing.code=='ui_selector_missing':return
+                raise
+            if next_button.get_attribute('content-desc')!='Далее' or not next_button.is_enabled():return
+            if self.driver.find_elements('class name','android.widget.ProgressBar'):return
+            if self.text(self._id('action_bar_title'))!='Новое видео Reels':raise UIError('publication_notice_unverified')
+            if self.text(self._id('caption_input_text_view'))!=self.context['caption']:raise UIError('publication_content_unverified')
+            # A first tap can only blur/reflow the caption field. Continue the
+            # still-visible Next navigation once, with a fresh server veto check.
+            self._authorize_continuation();next_button.click()
+            confirmation=self.find(notice,timeout=15)
         if self.text(self._id('clips_nux_sheet_title'))!='О Reels':raise UIError('publication_notice_unverified')
         if self.text(self._id('caption_input_text_view'))!=self.context['caption']:raise UIError('publication_content_unverified')
-        self.guard.check();button.click()
+        self._authorize_continuation();confirmation.click()
 
     def verify_publication(self):
         if self.profile.navigation_only:raise UIError('profile_navigation_only')
