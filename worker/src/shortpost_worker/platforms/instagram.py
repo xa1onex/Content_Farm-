@@ -23,6 +23,11 @@ class InstagramPublisher(PlatformPublisher):
         element=self.find(locator);self.guard.check();element.click()
 
     def _open_own_profile(self):
+        # The dedicated own-Reels viewer has no bottom navigation bar.
+        if self.driver.find_elements('id',self._id('clips_viewer_action_bar_title').value):
+            if normalize_user(self.text(self._id('clips_author_username')))!=normalize_user(self.assignment.account.username):
+                raise UIError('publication_author_unverified')
+            self.guard.check();self.driver.back();self._settle(.5)
         # Return from other tabs, then close a retained nested post viewer.
         self._click(self._id('feed_tab'))
         self._settle(.5)
@@ -37,6 +42,11 @@ class InstagramPublisher(PlatformPublisher):
             if len(back)!=1 or len(title)!=1 or title[0].text not in ('Публикации','Видео Reels'):break
             self.guard.check();self.driver.back();self._settle(.5)
         self._profile_owner()
+        # Returning from a grid tile retains its scroll offset. Counts must be
+        # read at the top of our own profile before checking a new publication.
+        for _ in range(3):
+            if self.driver.find_elements('id',self._id('profile_header_familiar_post_count_value').value):break
+            self._drag(.25,.85);self._settle(.5)
 
     def _profile_owner(self):
         if normalize_user(self.text(self.profile.account))!=normalize_user(self.assignment.account.username):
@@ -59,9 +69,31 @@ class InstagramPublisher(PlatformPublisher):
 
     def _open_latest_reel(self):
         username=self.assignment.account.username
-        self._click(Locator(by='accessibility id',value=f'Видео Reels {username} в строке 1, столбце 1'))
-        if normalize_user(self.text(self._id('row_feed_photo_profile_name')))!=normalize_user(username):
-            raise UIError('publication_author_unverified')
+        reels_tab=Locator(by='xpath',value='//*[@resource-id="com.instagram.android:id/profile_tab_icon_view" and @content-desc="Reels"]')
+        tabs=self.driver.find_elements(reels_tab.by,reels_tab.value)
+        in_reels=len(tabs)==1 and tabs[0].get_attribute('selected')=='true'
+        grid=Locator(by='accessibility id',value=f'Видео Reels {username} в строке 1, столбце 1')
+        thumb=Locator(by='xpath',value='(//*[@resource-id="com.instagram.android:id/preview_clip_thumbnail" and (starts-with(@content-desc,'+
+            xpath_literal('Видео\u00a0Reels от '+username+'.')+') or starts-with(@content-desc,'+xpath_literal('Видео Reels от '+username+'.')+'))])[1]')
+        for use_reels in ([True] if in_reels else [False,True]):
+            if use_reels and not in_reels:
+                self._click(reels_tab);self._settle(.5)
+            locator=thumb if use_reels else grid
+            for attempt in range(4):
+                try:element=self.find(locator,timeout=2);break
+                except UIError as exc:
+                    if exc.code!='ui_selector_missing':raise
+                    if attempt==3:
+                        if use_reels:raise
+                        element=None;break
+                    # New profiles put recommendations above their first row.
+                    self._drag(.78,.35);self._settle(.5)
+            if element is not None:
+                self.guard.check();element.click()
+                author='clips_author_username' if use_reels else 'row_feed_photo_profile_name'
+                if normalize_user(self.text(self._id(author)))!=normalize_user(username):
+                    raise UIError('publication_author_unverified')
+                return
 
     def _settle(self,seconds=1.5):
         until=time.monotonic()+seconds
@@ -84,6 +116,7 @@ class InstagramPublisher(PlatformPublisher):
     def read_open_reel(self,caption=None):
         """Read the opened own Reel. Also used to calibrate against an existing post."""
         username=self.assignment.account.username
+        if self.driver.find_elements('id',self._id('clips_author_username').value):return self._read_reels_viewer(caption)
         if normalize_user(self.text(self._id('row_feed_photo_profile_name')))!=normalize_user(username):
             raise UIError('publication_author_unverified')
         self._drag(.77,.42)
@@ -113,6 +146,31 @@ class InstagramPublisher(PlatformPublisher):
             # A failed read must not leave a sheet blocking the next profile check.
             try:self._dismiss_share()
             except (WebDriverException,AppiumTransportError,TimeoutError,ConnectionError):pass
+
+    def _read_reels_viewer(self,caption=None):
+        username=self.assignment.account.username
+        if normalize_user(self.text(self._id('clips_author_username')))!=normalize_user(username):
+            raise UIError('publication_author_unverified')
+        if caption is not None:
+            # Expanding the actual caption opens its original entry in the comments sheet.
+            self._click(Locator(by='xpath',value='//*[@resource-id="com.instagram.android:id/clips_caption_component"]//*[@clickable="true"]'))
+            try:
+                expected='Пользователь '+username+' оставил комментарий: "'+caption+'"'
+                locator=Locator(by='xpath',value='//*[@text='+xpath_literal(expected)+' or @content-desc='+xpath_literal(expected)+']')
+                if self.text(locator)!=expected:
+                    if self.text(locator.model_copy(update={'attribute':'content-desc'}))!=expected:raise UIError('publication_content_unverified')
+            finally:self.guard.check();self.driver.back();self._settle(.5)
+        nonce='shortpost-link-check-'+uuid.uuid4().hex
+        self._clipboard(nonce)
+        if normalize_user(self.text(self._id('clips_author_username')))!=normalize_user(username):raise UIError('publication_author_unverified')
+        self._click(self._id('direct_share_button'));self._settle()
+        try:
+            self._click(Locator(by='xpath',value='//*[@resource-id="com.instagram.android:id/button" and @content-desc="Копировать ссылку"]'))
+            self._settle(.5);raw=self._clipboard()
+            if raw==nonce:raise UIError('publication_link_not_copied')
+            external_id,url=canonical_post('instagram',raw,username)
+            return {'external_id':external_id,'url':url}
+        finally:self._dismiss_share()
 
     def verify_account(self,assignment):
         if self.profile.instagram_reels_452:
@@ -155,8 +213,8 @@ class InstagramPublisher(PlatformPublisher):
                 if count<self.before_post_count or count>self.before_post_count+1:
                     raise UIError('publication_count_ambiguous')
                 if count==self.before_post_count+1:
-                    profile_open=False
-                    self._open_latest_reel();proof=self.read_open_reel(self.context['caption'])
+                    self._open_latest_reel();profile_open=False
+                    proof=self.read_open_reel(self.context['caption'])
                     if proof['external_id']==self.before_post_id:raise UIError('publication_link_not_new')
                     return proof
             except UIError as exc:
@@ -166,7 +224,7 @@ class InstagramPublisher(PlatformPublisher):
                 logging.getLogger(__name__).warning('confirmation_transport_wait type=%s',type(exc).__name__)
             if time.monotonic()>=deadline:raise UIError('publication_not_confirmed')
             if profile_open:
-                try:self._drag(.28,.78)
+                try:self._open_own_profile();self._drag(.28,.78)
                 except (WebDriverException,AppiumTransportError,TimeoutError,ConnectionError) as exc:
                     logging.getLogger(__name__).warning('confirmation_refresh_wait type=%s',type(exc).__name__)
             until=min(deadline,time.monotonic()+5)

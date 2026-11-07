@@ -13,7 +13,7 @@ def native_profile():
 def publisher(tmp_path):
     p=InstagramPublisher(native_profile(),Mock(),Mock(),Mock(),tmp_path)
     p.assignment=SimpleNamespace(account=SimpleNamespace(username='example'))
-    p._settle=Mock()
+    p._settle=Mock();p._drag=Mock()
     p.driver.find_elements.return_value=[]
     p.context={'caption':'Описание ролика'};p.before_post_count=5;p.before_post_id='OLD_123'
     return p
@@ -172,3 +172,71 @@ def test_lease_loss_before_disclosure_confirmation_stops_final_click(tmp_path):
     p.guard.check.side_effect=[None,None,LeaseLost()]
     with pytest.raises(LeaseLost):p.submit(authorize)
     share.click.assert_called_once();notice.click.assert_not_called()
+
+
+def test_first_reel_below_recommendations_is_found_by_exact_identity(tmp_path):
+    p=publisher(tmp_path);tile=Mock();p.find=Mock(side_effect=[UIError('ui_selector_missing'),tile]);p.text=Mock(return_value='example')
+    p._open_latest_reel()
+    p._drag.assert_called_once_with(.78,.35);tile.click.assert_called_once()
+    assert all(call.args[0].value=='Видео Reels example в строке 1, столбце 1' for call in p.find.call_args_list)
+
+
+def test_missing_exact_first_reel_never_selects_an_unrelated_tile(tmp_path):
+    p=publisher(tmp_path);p.find=Mock(side_effect=UIError('ui_selector_missing'));p._click=Mock()
+    with pytest.raises(UIError,match='ui_selector_missing'):p._open_latest_reel()
+    assert p.find.call_count==8 and p._drag.call_count==6
+
+
+def test_return_to_scrolled_own_grid_restores_counts_before_verification(tmp_path):
+    p=publisher(tmp_path);p._click=Mock();p._profile_owner=Mock();state={'top':False}
+    p.driver.find_elements.side_effect=lambda by,value: [Mock()] if state['top'] and value.endswith('/profile_header_familiar_post_count_value') else []
+    p._drag.side_effect=lambda *args:state.update(top=True)
+    p._open_own_profile()
+    p._profile_owner.assert_called_once();p._drag.assert_called_once_with(.25,.85)
+
+
+def test_count_increase_with_stale_empty_grid_refreshes_and_retries_without_submit(tmp_path,monkeypatch):
+    fake_clock(monkeypatch);p=publisher(tmp_path);p._open_own_profile=Mock();p._post_count=Mock(return_value=6)
+    p._open_latest_reel=Mock(side_effect=[UIError('ui_selector_missing'),None]);p.read_open_reel=Mock(return_value={'external_id':'NEW_123'})
+    p.submit=Mock()
+    assert p.verify_publication()['external_id']=='NEW_123'
+    assert p._open_own_profile.call_count==3
+    p._drag.assert_called_once_with(.28,.78);p.submit.assert_not_called()
+
+
+def test_reels_only_profile_uses_own_first_thumbnail_and_checks_author(tmp_path):
+    p=publisher(tmp_path);tab=Mock();tab.get_attribute.return_value='true'
+    p.driver.find_elements.return_value=[tab];tile=Mock();p.find=Mock(return_value=tile);p.text=Mock(return_value='example')
+    p._open_latest_reel()
+    assert 'preview_clip_thumbnail' in p.find.call_args.args[0].value
+    assert 'example.' in p.find.call_args.args[0].value
+    tile.click.assert_called_once();p._drag.assert_not_called()
+
+
+def test_reels_viewer_proves_expanded_original_caption_and_fresh_link(tmp_path):
+    p=publisher(tmp_path);p._click=Mock()
+    p.driver.find_elements.side_effect=lambda by,value:[Mock()] if value.endswith('/clips_author_username') else []
+    expected='Пользователь example оставил комментарий: "Описание ролика"'
+    p.text=Mock(side_effect=['example',expected,'example']);p.driver.get_clipboard_text.return_value='https://www.instagram.com/reel/NEW_123/?igsh=x'
+    assert p.read_open_reel('Описание ролика')=={'external_id':'NEW_123','url':'https://www.instagram.com/reel/NEW_123/'}
+    p.driver.back.assert_called_once();p.driver.set_clipboard_text.assert_called_once()
+    assert any(call.args[0].value.endswith('/direct_share_button') for call in p._click.call_args_list)
+
+
+def test_reels_viewer_wrong_full_caption_closes_sheet_without_copying_link(tmp_path):
+    p=publisher(tmp_path);p._click=Mock();p._clipboard=Mock()
+    p.text=Mock(side_effect=['example','wrong caption','wrong caption'])
+    with pytest.raises(UIError,match='publication_content_unverified'):p._read_reels_viewer('Описание ролика')
+    p.driver.back.assert_called_once();p._clipboard.assert_not_called()
+
+
+def test_reels_viewer_wrong_author_stops_before_reading_caption(tmp_path):
+    p=publisher(tmp_path);p._click=Mock();p.text=Mock(return_value='other')
+    with pytest.raises(UIError,match='publication_author_unverified'):p._read_reels_viewer('Описание ролика')
+    p._click.assert_not_called()
+
+
+def test_reels_viewer_stale_clipboard_is_not_a_publication_proof(tmp_path):
+    p=publisher(tmp_path);p._click=Mock();p.text=Mock(return_value='example')
+    p.driver.get_clipboard_text.side_effect=lambda:p.driver.set_clipboard_text.call_args.args[0]
+    with pytest.raises(UIError,match='publication_link_not_copied'):p._read_reels_viewer()
