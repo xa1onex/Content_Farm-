@@ -344,10 +344,41 @@ def test_editorial_veto_before_first_reels_final_confirmation_blocks_share(tmp_p
     first.click.assert_called_once();notice.click.assert_not_called()
 
 
-def test_next_continuation_never_clicks_a_button_that_has_become_share(tmp_path):
+def test_next_can_reveal_final_share_only_on_verified_composer(tmp_path):
     p=publisher(tmp_path);first=Mock();current=Mock();first.get_attribute.return_value='Далее';current.get_attribute.return_value='Поделиться'
+    current.is_enabled.return_value=True;p.driver.find_elements.return_value=[]
     p.find=Mock(side_effect=[first,UIError('ui_selector_missing'),current]);p.authorize_continue=Mock()
-    p.submit(Mock());first.click.assert_called_once();current.click.assert_not_called();p.authorize_continue.assert_not_called()
+    p.text=Mock(side_effect=['Новое видео Reels','Описание ролика'])
+    p.submit(Mock());first.click.assert_called_once();current.click.assert_called_once();p.authorize_continue.assert_called_once()
+
+
+def test_revealed_final_share_with_another_caption_is_never_clicked(tmp_path):
+    p=publisher(tmp_path);first=Mock();current=Mock();first.get_attribute.return_value='Далее';current.get_attribute.return_value='Поделиться'
+    current.is_enabled.return_value=True;p.driver.find_elements.return_value=[]
+    p.find=Mock(side_effect=[first,UIError('ui_selector_missing'),current]);p.authorize_continue=Mock()
+    p.text=Mock(side_effect=['Новое видео Reels','Другая подпись'])
+    with pytest.raises(UIError,match='publication_content_unverified'):p.submit(Mock())
+    current.click.assert_not_called();p.authorize_continue.assert_not_called()
+
+
+def test_fresh_server_veto_blocks_revealed_final_share(tmp_path):
+    from shortpost_worker.errors import WorkerError
+    p=publisher(tmp_path);first=Mock();current=Mock();first.get_attribute.return_value='Далее';current.get_attribute.return_value='Поделиться'
+    current.is_enabled.return_value=True;p.driver.find_elements.return_value=[]
+    p.find=Mock(side_effect=[first,UIError('ui_selector_missing'),current]);p.authorize_continue=Mock(side_effect=WorkerError('publication_permission_denied'))
+    p.text=Mock(side_effect=['Новое видео Reels','Описание ролика'])
+    with pytest.raises(WorkerError,match='publication_permission_denied'):p.submit(Mock())
+    current.click.assert_not_called()
+
+
+def test_second_next_can_reveal_final_share_without_disclosure(tmp_path):
+    p=publisher(tmp_path);first=Mock();next_button=Mock();final=Mock()
+    first.get_attribute.return_value='Далее';next_button.get_attribute.return_value='Далее';final.get_attribute.return_value='Поделиться'
+    next_button.is_enabled.return_value=True;final.is_enabled.return_value=True;p.driver.find_elements.return_value=[]
+    p.find=Mock(side_effect=[first,UIError('ui_selector_missing'),next_button,UIError('ui_selector_missing'),final]);p.authorize_continue=Mock()
+    p.text=Mock(side_effect=['Новое видео Reels','Описание ролика','Новое видео Reels','Описание ролика'])
+    p.submit(Mock());first.click.assert_called_once();next_button.click.assert_called_once();final.click.assert_called_once()
+    assert p.authorize_continue.call_count==2
 
 
 def test_pending_processing_blocks_extra_next_navigation(tmp_path):

@@ -298,14 +298,25 @@ class InstagramPublisher(PlatformPublisher):
             except UIError as missing:
                 if missing.code=='ui_selector_missing':return
                 raise
-            if next_button.get_attribute('content-desc')!='Далее' or not next_button.is_enabled():return
+            next_label=next_button.get_attribute('content-desc') or next_button.text
+            if next_label not in ('Далее','Поделиться') or not next_button.is_enabled():return
             if self.driver.find_elements('class name','android.widget.ProgressBar'):return
             if self.text(self._id('action_bar_title'))!='Новое видео Reels':raise UIError('publication_notice_unverified')
             if self.text(self._id('caption_input_text_view'))!=self.context['caption']:raise UIError('publication_content_unverified')
-            # A first tap can only blur/reflow the caption field. Continue the
-            # still-visible Next navigation once, with a fresh server veto check.
+            # Next can reveal the final Share composer without a disclosure.
+            # Only the exact assigned caption and a fresh server permission
+            # allow this transition. Never repeat a real Share action.
             self._authorize_continuation();next_button.click()
-            confirmation=self.find(notice,timeout=15)
+            if next_label=='Поделиться':return
+            try:confirmation=self.find(notice,timeout=15)
+            except UIError as missing:
+                if missing.code!='ui_selector_missing':raise
+                final=self.find(self.profile.submit,timeout=2)
+                if (final.get_attribute('content-desc') or final.text)!='Поделиться' or not final.is_enabled():raise UIError('publication_notice_unverified')
+                if self.driver.find_elements('class name','android.widget.ProgressBar'):raise UIError('publication_notice_unverified')
+                if self.text(self._id('action_bar_title'))!='Новое видео Reels':raise UIError('publication_notice_unverified')
+                if self.text(self._id('caption_input_text_view'))!=self.context['caption']:raise UIError('publication_content_unverified')
+                self._authorize_continuation();final.click();return
         if self.text(self._id('clips_nux_sheet_title'))!='О Reels':raise UIError('publication_notice_unverified')
         if self.text(self._id('caption_input_text_view'))!=self.context['caption']:raise UIError('publication_content_unverified')
         self._authorize_continuation();confirmation.click()
