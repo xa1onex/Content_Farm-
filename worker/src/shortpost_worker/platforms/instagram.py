@@ -22,6 +22,22 @@ class InstagramPublisher(PlatformPublisher):
     def _click(self,locator):
         element=self.find(locator);self.guard.check();element.click()
 
+    def _open_own_profile(self):
+        # Return from other tabs, then close a retained nested post viewer.
+        self._click(self._id('feed_tab'))
+        self._settle(.5)
+        self._click(self._id('profile_tab'))
+        self._settle(.5)
+        # Instagram preserves each tab's navigation stack. Its own-post viewer
+        # must be closed explicitly; a tab switch alone does not reset it.
+        for _ in range(3):
+            if self.driver.find_elements('id',self._id('profile_header_familiar_post_count_value').value):break
+            back=self.driver.find_elements('id',self._id('action_bar_button_back').value)
+            title=self.driver.find_elements('id',self._id('action_bar_title').value)
+            if len(back)!=1 or len(title)!=1 or title[0].text not in ('Публикации','Видео Reels'):break
+            self.guard.check();self.driver.back();self._settle(.5)
+        self._profile_owner()
+
     def _profile_owner(self):
         if normalize_user(self.text(self.profile.account))!=normalize_user(self.assignment.account.username):
             raise UIError('account_mismatch')
@@ -101,6 +117,7 @@ class InstagramPublisher(PlatformPublisher):
     def verify_account(self,assignment):
         if self.profile.instagram_reels_452:
             self.guard.check();self.driver.activate_app(self.profile.package);self._dismiss_share()
+            self.assignment=assignment;self._open_own_profile()
         super().verify_account(assignment)
         if not self.profile.instagram_reels_452:return
         self.before_post_count=self._post_count();self.before_post_id=None
@@ -120,8 +137,8 @@ class InstagramPublisher(PlatformPublisher):
                 # Instagram can redirect to the Reels feed after accepting the upload.
                 # Reopening our profile is safe to repeat; submit() is never called here.
                 self._dismiss_share()
-                self._click(self._id('profile_tab'))
-                self._profile_owner();count=self._post_count();profile_open=True
+                self._open_own_profile()
+                count=self._post_count();profile_open=True
                 if count<self.before_post_count or count>self.before_post_count+1:
                     raise UIError('publication_count_ambiguous')
                 if count==self.before_post_count+1:

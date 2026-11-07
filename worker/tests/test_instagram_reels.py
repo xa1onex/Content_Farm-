@@ -96,7 +96,7 @@ def test_caption_can_use_accessibility_description_instead_of_text(tmp_path):
 def test_transient_read_error_after_submit_retries_confirmation_only(tmp_path,monkeypatch):
     from selenium.common.exceptions import StaleElementReferenceException
     fake_clock(monkeypatch);p=publisher(tmp_path)
-    p._click=Mock(side_effect=[StaleElementReferenceException(),None]);p._profile_owner=Mock()
+    p._click=Mock(side_effect=[StaleElementReferenceException(),None,None]);p._profile_owner=Mock()
     p._post_count=Mock(return_value=6);p._open_latest_reel=Mock();p._drag=Mock()
     p.read_open_reel=Mock(return_value={'external_id':'NEW_123','url':'https://www.instagram.com/reel/NEW_123/'})
     p.submit=Mock()
@@ -112,3 +112,33 @@ def test_share_sheet_is_closed_after_failed_clipboard_read(tmp_path):
     p.driver.get_clipboard_text.side_effect=lambda:p.driver.set_clipboard_text.call_args.args[0]
     with pytest.raises(UIError,match='publication_link_not_copied'):p.read_open_reel(p.context['caption'])
     p.driver.back.assert_called_once()
+
+
+def test_confirmation_exits_retained_nested_post_before_reading_profile(tmp_path):
+    p=publisher(tmp_path);state={'screen':'post'}
+    p._click=Mock()  # Instagram restores the old nested view across tab switches.
+    def find(by,value):
+        name=value.rsplit('/',1)[-1]
+        if state['screen']=='profile' and name=='profile_header_familiar_post_count_value':return [Mock()]
+        if state['screen']=='post' and name=='action_bar_button_back':return [Mock()]
+        if state['screen']=='post' and name=='action_bar_title':return [SimpleNamespace(text='Публикации')]
+        return []  # The author row can already be outside the scrolled viewport.
+    p.driver.find_elements.side_effect=find
+    p.driver.back.side_effect=lambda:state.update(screen='profile')
+    def owner():
+        if state['screen']!='profile':raise UIError('account_mismatch')
+    p._profile_owner=owner;p._post_count=Mock(return_value=6);p._open_latest_reel=Mock()
+    p.read_open_reel=Mock(return_value={'external_id':'NEW_123'});p.submit=Mock()
+    assert p.verify_publication()['external_id']=='NEW_123'
+    p.driver.back.assert_called_once();p.submit.assert_not_called()
+
+
+def test_profile_recovery_never_backs_out_of_a_publication_composer(tmp_path):
+    p=publisher(tmp_path);p._click=Mock();p._profile_owner=Mock(side_effect=UIError('account_mismatch'))
+    def find(by,value):
+        if value.endswith('/action_bar_button_back'):return [Mock()]
+        if value.endswith('/action_bar_title'):return [SimpleNamespace(text='Новое видео Reels')]
+        return []
+    p.driver.find_elements.side_effect=find
+    with pytest.raises(UIError,match='account_mismatch'):p._open_own_profile()
+    p.driver.back.assert_not_called()
