@@ -48,7 +48,16 @@ class InstagramPublisher(PlatformPublisher):
         if len(title)==1 and title[0].text=='Ваши видео Reels':
             self.guard.check();self.driver.back();self._settle(.5)
 
+    def _dismiss_comment_sheet(self):
+        # Expanding a Reel caption can open comments instead of inline text.
+        # Close only the identified comment composer, never a publication composer.
+        locator=self._id('layout_comment_thread_edittext_multiline')
+        sheet=self.driver.find_elements(locator.by,locator.value)
+        if len(sheet)==1 and sheet[0].is_displayed():
+            self.guard.check();self.driver.back();self._settle(.5)
+
     def _open_own_profile(self):
+        self._dismiss_comment_sheet()
         self._dismiss_account_switcher()
         self._dismiss_own_reels()
         # The dedicated own-Reels viewer has no bottom navigation bar.

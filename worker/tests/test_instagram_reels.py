@@ -527,3 +527,13 @@ def test_real_share_with_progress_is_still_never_clicked_twice(tmp_path):
     p=publisher(tmp_path);share=Mock();share.get_attribute.return_value='Поделиться';p.driver.find_elements.return_value=[Mock()]
     p.find=Mock(side_effect=[share,UIError('ui_selector_missing')]);p.authorize_continue=Mock()
     p.submit(Mock());share.click.assert_called_once();p.authorize_continue.assert_not_called()
+
+def test_open_profile_closes_identified_comments_before_bottom_navigation(tmp_path):
+    p=publisher(tmp_path);comment=Mock();comment.is_displayed.return_value=True
+    p.driver.find_elements.side_effect=lambda by,value:[comment] if value.endswith('/layout_comment_thread_edittext_multiline') else []
+    p._dismiss_comment_sheet();p.driver.back.assert_called_once();p.guard.check.assert_called_once()
+
+
+def test_comment_dismissal_never_closes_video_publication_composer(tmp_path):
+    p=publisher(tmp_path);p.driver.find_elements.side_effect=lambda by,value:[Mock()] if value.endswith('/caption_input_text_view') else []
+    p._dismiss_comment_sheet();p.driver.back.assert_not_called()
