@@ -31,7 +31,7 @@ class Api:
         self.config=config;self.journal=journal;self.clock=Clock();self.limiter=RateLimiter()
         self.client=httpx.AsyncClient(base_url=config.api_url+'/',headers={'Authorization':'Bearer '+token},
             verify=True,follow_redirects=False,timeout=config.request_timeout_seconds,
-            transport=transport,limits=httpx.Limits(max_connections=20,max_keepalive_connections=10))
+            transport=transport,trust_env=False,limits=httpx.Limits(max_connections=20,max_keepalive_connections=0))
         self.auth_failed=asyncio.Event();self.blocked_until=0.0
     def retry_after(self,response):
         value=response.headers.get('Retry-After','60')
