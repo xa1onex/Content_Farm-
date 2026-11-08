@@ -159,6 +159,14 @@ def publication_timing(s,jobs,pubs,stamp):
     for j in sorted(jobs,key=lambda j:(j.status not in ('processing','assigned'),j.scheduled_at,j.created_at)):
         if j.status not in WAITING:continue
         gate=gates.get(str(j.id),{});previous=gate.get('previous_job_id');blocked=None
+        # Match admission: a proved no-send failure does not strand later accounts.
+        seen={str(j.id)}
+        while previous and previous not in seen:
+            seen.add(previous);pred_job=all_jobs.get(previous);link=gates.get(previous,{})
+            proof=(pred_job.result or {}) if pred_job else {}
+            if not pred_job or pred_job.status!='failed' or not proof.get('no_publish_attempted') or proof.get('no_republish') or link.get('campaign_id')!=gate.get('campaign_id'):break
+            previous=link.get('previous_job_id')
+        if previous==str(j.id):blocked='previous_publication_unconfirmed'
         account=account_map.get(j.account_id);resource=j.worker_id or workers.get(j.account_id);worker=worker_map.get(resource)
         if j.status not in ('processing','assigned'):
             if control and not control.value.get('enabled',True):blocked='scheduler_paused'

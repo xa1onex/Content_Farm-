@@ -1,5 +1,5 @@
 import re,time,uuid,logging,json
-from selenium.common.exceptions import WebDriverException
+from selenium.common.exceptions import WebDriverException,StaleElementReferenceException
 from urllib3.exceptions import HTTPError as AppiumTransportError
 from .base import PlatformPublisher,canonical_post,normalize_user
 from .profile import Locator
@@ -20,7 +20,14 @@ class InstagramPublisher(PlatformPublisher):
     def _id(self,name):return Locator(by='id',value='com.instagram.android:id/'+name)
 
     def _click(self,locator):
-        element=self.find(locator);self.guard.check();element.click()
+        # Re-find navigation after a UI re-render; final submit is separately fenced.
+        for attempt in range(3):
+            self.guard.check()
+            try:
+                element=self.find(locator);self.guard.check();element.click();return
+            except StaleElementReferenceException:
+                if attempt==2:raise UIError('ui_element_unstable') from None
+                self._settle(.25)
 
     def _dismiss_account_switcher(self):
         # Decline only Instagram's identified optional rating prompt.

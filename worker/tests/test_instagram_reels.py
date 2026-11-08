@@ -480,3 +480,30 @@ def test_optional_instagram_rating_prompt_is_declined_without_rating_or_submissi
     p.driver.find_elements.side_effect=lambda by,value: [title] if value.endswith('/appirater_title_area') else ([cancel] if value.endswith('/appirater_cancel_button') else [])
     p._dismiss_account_switcher();cancel.click.assert_called_once();p.driver.back.assert_not_called()
     title.text='Другой диалог';cancel.reset_mock();p._dismiss_account_switcher();cancel.click.assert_not_called()
+
+def test_navigation_refinds_stale_element_before_retry(tmp_path):
+    from selenium.common.exceptions import StaleElementReferenceException
+    p=publisher(tmp_path);old=Mock();fresh=Mock();old.click.side_effect=StaleElementReferenceException()
+    p.find=Mock(side_effect=[old,fresh]);locator=p._id('direct_share_button')
+    p._click(locator)
+    assert p.find.call_count==2 and p.guard.check.call_count==4
+    fresh.click.assert_called_once();p._settle.assert_called_once_with(.25)
+
+def test_navigation_stale_retry_is_bounded_and_has_clear_error(tmp_path):
+    from selenium.common.exceptions import StaleElementReferenceException
+    p=publisher(tmp_path);element=Mock();element.click.side_effect=StaleElementReferenceException();p.find=Mock(return_value=element)
+    with pytest.raises(UIError,match='ui_element_unstable'):p._click(p._id('direct_share_button'))
+    assert p.find.call_count==3
+
+def test_navigation_does_not_retry_ambiguous_transport_failure(tmp_path):
+    from selenium.common.exceptions import WebDriverException
+    p=publisher(tmp_path);element=Mock();element.click.side_effect=WebDriverException('transport');p.find=Mock(return_value=element)
+    with pytest.raises(WebDriverException):p._click(p._id('direct_share_button'))
+    assert p.find.call_count==1
+
+def test_navigation_retry_stops_on_lost_lease(tmp_path):
+    from selenium.common.exceptions import StaleElementReferenceException
+    p=publisher(tmp_path);element=Mock();element.click.side_effect=StaleElementReferenceException();p.find=Mock(return_value=element)
+    p.guard.check.side_effect=[None,None,LeaseLost()]
+    with pytest.raises(LeaseLost):p._click(p._id('direct_share_button'))
+    assert p.find.call_count==1
