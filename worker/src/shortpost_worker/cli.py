@@ -142,7 +142,9 @@ def main():
                     return
                 if args.command=='run' and args.live and not config.allow_publish:
                     raise RuntimeError('Live mode requires explicit allow_publish=true in local config')
-                asyncio.run(connected(config,journal,args.command,live=getattr(args,'live',False)))
+                from .power import prevent_idle_sleep
+                with prevent_idle_sleep(enabled=args.command=='run'):
+                    asyncio.run(connected(config,journal,args.command,live=getattr(args,'live',False)))
         finally:journal.close()
     except ValidationError:raise SystemExit('Invalid configuration or server contract; sensitive input omitted')
     except portalocker.exceptions.LockException:raise SystemExit('Worker/diagnostics already running under this Windows user')
