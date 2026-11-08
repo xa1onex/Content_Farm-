@@ -507,3 +507,23 @@ def test_navigation_retry_stops_on_lost_lease(tmp_path):
     p.guard.check.side_effect=[None,None,LeaseLost()]
     with pytest.raises(LeaseLost):p._click(p._id('direct_share_button'))
     assert p.find.call_count==1
+
+def test_thumbnail_progress_does_not_skip_verified_final_share(tmp_path):
+    p=publisher(tmp_path);first=Mock();share=Mock();first.get_attribute.return_value='Далее';share.get_attribute.return_value='Поделиться';share.is_enabled.return_value=True
+    p.find=Mock(side_effect=[first,UIError('ui_selector_missing'),share]);p.driver.find_elements.return_value=[Mock()]
+    p.text=Mock(side_effect=['Новое видео Reels','Описание ролика']);p.authorize_continue=Mock()
+    p.submit(Mock());share.click.assert_called_once();p.authorize_continue.assert_called_once()
+
+
+def test_thumbnail_progress_does_not_bypass_caption_verification(tmp_path):
+    p=publisher(tmp_path);first=Mock();share=Mock();first.get_attribute.return_value='Далее';share.get_attribute.return_value='Поделиться';share.is_enabled.return_value=True
+    p.find=Mock(side_effect=[first,UIError('ui_selector_missing'),share]);p.driver.find_elements.return_value=[Mock()]
+    p.text=Mock(side_effect=['Новое видео Reels','Другая подпись']);p.authorize_continue=Mock()
+    with pytest.raises(UIError,match='publication_content_unverified'):p.submit(Mock())
+    share.click.assert_not_called();p.authorize_continue.assert_not_called()
+
+
+def test_real_share_with_progress_is_still_never_clicked_twice(tmp_path):
+    p=publisher(tmp_path);share=Mock();share.get_attribute.return_value='Поделиться';p.driver.find_elements.return_value=[Mock()]
+    p.find=Mock(side_effect=[share,UIError('ui_selector_missing')]);p.authorize_continue=Mock()
+    p.submit(Mock());share.click.assert_called_once();p.authorize_continue.assert_not_called()

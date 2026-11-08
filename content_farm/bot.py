@@ -160,7 +160,7 @@ async def worker(bot):
         status_message = None
         reporter = ProgressReporter(loop,None)
         try:
-            update_state(job_dir,status='processing',error=None,stage='Анализирую исходник' if state.get('analysis_only') and not state.get('selection_confirmed') else 'Создаю ролики',processing_started_at=datetime.now(timezone.utc).isoformat())
+            update_state(job_dir,status='processing',error=None,error_message=None,stage='Анализирую исходник' if state.get('analysis_only') and not state.get('selection_confirmed') else 'Создаю ролики',processing_started_at=datetime.now(timezone.utc).isoformat())
             try:
                 status_message = await reply(bot,state['chat_id'],f'⏳ Задание <code>{state["id"]}</code>: начинаю обработку.')
             except TelegramAPIError:

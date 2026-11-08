@@ -307,7 +307,7 @@ class InstagramPublisher(PlatformPublisher):
                 raise
             next_label=next_button.get_attribute('content-desc') or next_button.text
             if next_label not in ('Далее','Поделиться') or not next_button.is_enabled():return
-            if self.driver.find_elements('class name','android.widget.ProgressBar'):return
+            if next_label=='Далее' and self.driver.find_elements('class name','android.widget.ProgressBar'):return
             if self.text(self._id('action_bar_title'))!='Новое видео Reels':raise UIError('publication_notice_unverified')
             if self.text(self._id('caption_input_text_view'))!=self.context['caption']:raise UIError('publication_content_unverified')
             # Next can reveal the final Share composer without a disclosure.
@@ -320,7 +320,8 @@ class InstagramPublisher(PlatformPublisher):
                 if missing.code!='ui_selector_missing':raise
                 final=self.find(self.profile.submit,timeout=2)
                 if (final.get_attribute('content-desc') or final.text)!='Поделиться' or not final.is_enabled():raise UIError('publication_notice_unverified')
-                if self.driver.find_elements('class name','android.widget.ProgressBar'):raise UIError('publication_notice_unverified')
+                # Thumbnail progress can remain visible on a ready Share composer.
+                # Exact title, caption, enabled Share and fresh permission fence the click.
                 if self.text(self._id('action_bar_title'))!='Новое видео Reels':raise UIError('publication_notice_unverified')
                 if self.text(self._id('caption_input_text_view'))!=self.context['caption']:raise UIError('publication_content_unverified')
                 self._authorize_continuation();final.click();return
